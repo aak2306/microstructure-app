@@ -29,24 +29,25 @@ if random_seed != 0:
 width_px, height_px = int(image_width_um * pixel_per_um), int(image_height_um * pixel_per_um)
 canvas = np.zeros((height_px, width_px), dtype=np.uint8)
 
-# Estimate number of particles
+# Estimate number of particles for desired volume fraction (use shape‑specific area)
 rad_um = particle_diameter_um / 2
 if shape == "Elliptical":
-    shape_area_um2 = np.pi * rad_um * (0.8 * rad_um)
+    shape_area_um2 = np.pi * rad_um * (0.8 * rad_um)  # average ry ≈ 0.8 r
 elif shape == "Irregular (Blob)":
-    shape_area_um2 = np.pi * rad_um**2 * 1.2
+    shape_area_um2 = np.pi * rad_um**2 * 1.2          # blobs a bit larger on avg
 else:
     shape_area_um2 = np.pi * rad_um**2
 
 area_target_um2 = image_width_um * image_height_um * (volume_fraction / 100)
 num_particles = max(1, int(area_target_um2 / shape_area_um2))
 
+# Convert typical radius to px for placement boundaries
 avg_rad_px = int(rad_um * pixel_per_um)
 
 pil_img = Image.fromarray(canvas)
 d = ImageDraw.Draw(pil_img)
 
-# --- Particle Placement ---
+# --- Particle Generation (simple non‑overlap rejection to improve homogeneity) ---
 placed_centers = []
 max_attempts = num_particles * 10
 attempts = 0
@@ -54,6 +55,7 @@ while len(placed_centers) < num_particles and attempts < max_attempts:
     attempts += 1
     cx = np.random.randint(avg_rad_px, width_px - avg_rad_px)
     cy = np.random.randint(avg_rad_px, height_px - avg_rad_px)
+    # Ensure new center not too close to existing (Poisson‑like)
     if all((cx - x)**2 + (cy - y)**2 > (2*avg_rad_px)**2 for x, y in placed_centers):
         r_px = int(avg_rad_px * (1 + np.random.uniform(-0.3, 0.3)))
         if shape == "Circular":
@@ -67,14 +69,15 @@ while len(placed_centers) < num_particles and attempts < max_attempts:
             blob = np.zeros_like(canvas)
             blob[rr, cc] = 255
             angle = np.random.rand() * 360
-            blob_img = Image.fromarray(blob).rotate(angle, expand=False)
+            blob_img = Image.fromarray(blob)
+            blob_img = blob_img.rotate(angle, expand=False)
             pil_img = Image.fromarray(np.maximum(np.array(pil_img), np.array(blob_img)))
             d = ImageDraw.Draw(pil_img)
         placed_centers.append((cx, cy))
 
 canvas = np.array(pil_img)
 
-# --- Add scale bar box ---
+# --- Create composite with separate white scale‑box ---
 scale_um = image_width_um / 5
 scale_px = int(scale_um * pixel_per_um)
 bar_h = max(4, int(0.01 * height_px))
@@ -82,7 +85,7 @@ box_h = bar_h + 30
 final = Image.new("L", (width_px, height_px + box_h), color=255)
 final.paste(pil_img, (0, 0))
 
-# Draw scale bar and label
+# Draw scale bar
 draw_final = ImageDraw.Draw(final)
 bar_x1 = (width_px - scale_px) // 2
 bar_y1 = height_px + 8
@@ -90,7 +93,7 @@ draw_final.rectangle([bar_x1, bar_y1, bar_x1 + scale_px, bar_y1 + bar_h], fill=0
 
 scale_label = f"{int(scale_um)} µm"
 try:
-    font = ImageFont.truetype("arial.ttf", 14)
+    font = ImageFont.truetype("arial.ttf", 18)
 except:
     font = ImageFont.load_default()
 
@@ -100,19 +103,17 @@ text_x = (width_px - text_w) // 2
 text_y = bar_y1 + bar_h + 4
 draw_final.text((text_x, text_y), scale_label, fill=0, font=font)
 
-# --- Analysis ---
+# --- Metrics ---
 binary = (canvas > 0).astype(bool)
 labels = label(binary)
 interface_px = np.sum([perimeter(labels == i) for i in range(1, labels.max()+1)])
 interface_um = interface_px / pixel_per_um
 ratio = interface_um / (image_width_um * image_height_um)
 
-# --- Display ---
-st.markdown("---")
+# --- Streamlit Display ---
+st.markdown("""---""")
 st.subheader("Results")
-st.write(f"**Particles Placed:** {len(placed_centers)}")
-st.write(f"**Interfacial Length:** {interface_um:.2f} µm")
-st.write(f"**Interface-to-Area Ratio:** {ratio:.5f} µm⁻¹")
+st.write(f"**Particles Placed:** {len(placed_centers)} | **Interfacial Length:** {interface_um:.2f} µm | **Interface/Area:** {ratio:.5f} µm⁻¹")
 
 st.image(np.array(final), caption="Simulated Microstructure", channels="GRAY", use_container_width=True)
 
