@@ -65,16 +65,18 @@ while len(placed_centers) < num_particles and attempts < max_attempts:
             ry = int(r_px * np.random.uniform(0.5, 1.2))
             d.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=255)
         else:  # Irregular blob
+            from scipy.ndimage import gaussian_filter
+
             blob_size = 2 * r_px
             noise = np.random.rand(blob_size, blob_size)
-            mask = (binary_fill_holes(noise > 0.6)).astype(np.uint8) * 255
+            blurred = gaussian_filter(noise, sigma=blob_size * 0.1)
+            mask = (blurred > 0.6).astype(np.uint8) * 255
 
             blob_img = Image.fromarray(mask)
             angle = np.random.rand() * 360
             blob_img = blob_img.rotate(angle, expand=True, fillcolor=0)
             blob_arr = np.array(blob_img)
 
-            # Get shape and paste safely
             bh, bw = blob_arr.shape
             top = cy - bh // 2
             left = cx - bw // 2
@@ -85,6 +87,7 @@ while len(placed_centers) < num_particles and attempts < max_attempts:
                 combined = np.maximum(temp_crop, blob_arr)
                 temp_canvas[top:top+bh, left:left+bw] = combined
                 pil_img = Image.fromarray(temp_canvas)
+                d = ImageDraw.Draw(pil_img)
                 d = ImageDraw.Draw(pil_img)
             d = ImageDraw.Draw(pil_img)
         placed_centers.append((cx, cy))
