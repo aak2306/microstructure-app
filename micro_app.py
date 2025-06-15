@@ -1,12 +1,11 @@
 import streamlit as st
 import numpy as np
-import cv2
+import matplotlib.pyplot as plt
 from skimage.measure import label, perimeter
 from skimage.draw import ellipse
 from scipy.ndimage import binary_fill_holes
-import matplotlib.pyplot as plt
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageDraw
 
 st.set_page_config(page_title="Microstructure Generator", layout="centered")
 st.title("Microstructure Interface Area Calculator")
@@ -37,27 +36,32 @@ num_particles = int((volume_fraction / 100.0) * image_area_um2 / particle_area_u
 avg_radius_px = int(particle_radius_um * pixel_per_um)
 
 # --- Particle Generation ---
+pil_image = Image.fromarray(image)
+draw = ImageDraw.Draw(pil_image)
+
 for _ in range(num_particles):
     x = np.random.randint(avg_radius_px, image_width_px - avg_radius_px)
     y = np.random.randint(avg_radius_px, image_height_px - avg_radius_px)
     r = int(avg_radius_px * (1 + np.random.uniform(-0.3, 0.3)))
 
     if shape == "Circular":
-        cv2.circle(image, (x, y), r, 255, -1)
+        draw.ellipse([x - r, y - r, x + r, y + r], fill=255)
+
     elif shape == "Elliptical":
         rx = int(r)
         ry = int(r * np.random.uniform(0.5, 1.5))
-        angle = np.random.randint(0, 180)
-        cv2.ellipse(image, (x, y), (rx, ry), angle, 0, 360, 255, -1)
+        draw.ellipse([x - rx, y - ry, x + rx, y + ry], fill=255)
+
     elif shape == "Irregular (Blob)":
         rr, cc = ellipse(x, y, r, r // 2, shape=image.shape)
         blob = np.zeros_like(image)
         blob[rr, cc] = 1
-        blob = binary_fill_holes(blob).astype(np.uint8)
-        angle = np.random.rand() * 360
-        M = cv2.getRotationMatrix2D((y, x), angle, 1.0)
-        rotated_blob = cv2.warpAffine(blob * 255, M, (image_width_px, image_height_px))
-        image = np.maximum(image, rotated_blob.astype(np.uint8))
+        blob = binary_fill_holes(blob).astype(np.uint8) * 255
+        image = np.maximum(np.array(pil_image), blob.astype(np.uint8))
+        pil_image = Image.fromarray(image)
+        draw = ImageDraw.Draw(pil_image)
+
+image = np.array(pil_image)
 
 # --- Analysis ---
 binary = image > 0
