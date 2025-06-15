@@ -78,7 +78,8 @@ try:
     font = ImageFont.truetype("arial.ttf", font_size)
 except:
     font = ImageFont.load_default()
-text_width, text_height = draw.textsize(info_text, font=font)
+
+text_width, text_height = font.getsize(info_text)
 text_x = (image_width_px - text_width) // 2
 text_y = image_height_px + (info_box_height - text_height) // 2
 
