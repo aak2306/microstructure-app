@@ -85,7 +85,7 @@ while len(placed_centers) < num_particles and attempts < max_attempts:
                     top = cy - bh // 2
                     left = cx - bw // 2
                     temp_canvas = np.array(pil_img)
-                    if 0 <= top < height_px - bh and 0 <= left < width_px - bw:
+                    if 0 <= top and top + bh <= height_px and 0 <= left and left + bw <= width_px:
                         temp_crop = temp_canvas[top:top+bh, left:left+bw]
                         combined = np.maximum(temp_crop, blob_arr)
                         temp_canvas[top:top+bh, left:left+bw] = combined
