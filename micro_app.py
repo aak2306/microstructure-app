@@ -61,41 +61,45 @@ for _ in range(num_particles):
         pil_image = Image.fromarray(image)
         draw = ImageDraw.Draw(pil_image)
 
-# --- Add Info Box at the Bottom ---
-info_box_height = 40
-extended_height = image_height_px + info_box_height
-extended_image = Image.new("L", (image_width_px, extended_height), color=255)
-extended_image.paste(pil_image, (0, 0))
-draw = ImageDraw.Draw(extended_image)
-
-# Draw white rectangle info box with black border
-draw.rectangle([(0, image_height_px), (image_width_px - 1, extended_height - 1)], outline=0, fill=255)
-
-# Add scale info text centered
-info_text = f"Image Size: {image_width_um:.1f} µm × {image_height_um:.1f} µm   |   Particle Size: {particle_diameter_um:.1f} µm   |   Volume Fraction: {volume_fraction}%"
+# --- Add Classic SEM-style Scale Bar ---
+scale_bar_um = image_width_um / 5
+scale_bar_px = int(scale_bar_um * pixel_per_um)
+bar_thickness = max(2, int(0.01 * image_height_px))
+margin = 10
+label_gap = 5
 font_size = 12
+
+x1 = margin
+x2 = margin + scale_bar_px
+y2 = image_height_px - margin
+y1 = y2 - bar_thickness
+
+# Draw scale bar (white)
+draw.rectangle([x1, y1, x2, y2], fill=255)
+
+# Draw label under the bar
+label_text = f"{int(scale_bar_um)} µm"
 try:
     font = ImageFont.truetype("arial.ttf", font_size)
 except:
     font = ImageFont.load_default()
 
-bbox = draw.textbbox((0, 0), info_text, font=font)
-text_width = bbox[2] - bbox[0]
-text_height = bbox[3] - bbox[1]
-text_x = (image_width_px - text_width) // 2
-text_y = image_height_px + (info_box_height - text_height) // 2
+label_bbox = draw.textbbox((0, 0), label_text, font=font)
+text_width = label_bbox[2] - label_bbox[0]
+text_height = label_bbox[3] - label_bbox[1]
+text_x = x1 + (scale_bar_px - text_width) // 2
+text_y = y2 + label_gap
 
-# Add black outline
+# Draw text in white
 for dx in [-1, 0, 1]:
     for dy in [-1, 0, 1]:
-        draw.text((text_x + dx, text_y + dy), info_text, fill=0, font=font)
-# Main text in white
-draw.text((text_x, text_y), info_text, fill=0, font=font)
+        draw.text((text_x + dx, text_y + dy), label_text, fill=0, font=font)
+draw.text((text_x, text_y), label_text, fill=255, font=font)
 
-image = np.array(extended_image)
+image = np.array(pil_image)
 
 # --- Analysis ---
-binary = image[:image_height_px, :] > 0
+binary = image > 0
 labeled = label(binary)
 interface_length_px = np.sum([perimeter(labeled == i) for i in range(1, labeled.max()+1)])
 interface_length_um = interface_length_px / pixel_per_um
