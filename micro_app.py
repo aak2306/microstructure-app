@@ -93,7 +93,7 @@ draw_final.rectangle([bar_x1, bar_y1, bar_x1 + scale_px, bar_y1 + bar_h], fill=0
 
 scale_label = f"{int(scale_um)} μm"
 try:
-    font = ImageFont.truetype("DejaVuSans.ttf", 18)
+    font = ImageFont.truetype("DejaVuSans.ttf", 10)
 except:
     font = ImageFont.load_default()
 
