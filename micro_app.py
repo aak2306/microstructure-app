@@ -104,7 +104,7 @@ text_y = bar_y1 + bar_h + 4
 draw_final.text((text_x, text_y), label, fill=0, font=font)
 
 # --- Metrics ---
-binary = canvas > 0
+binary = (canvas > 0).astype(bool)
 labels = label(binary)
 interface_px = np.sum([perimeter(labels == i) for i in range(1, labels.max()+1)])
 interface_um = interface_px / pixel_per_um
