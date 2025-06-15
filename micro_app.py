@@ -114,7 +114,7 @@ st.write(f"**Particles Placed:** {len(placed_centers)}")
 st.write(f"**Interfacial Length:** {interface_um:.2f} µm")
 st.write(f"**Interface-to-Area Ratio:** {ratio:.5f} µm⁻¹")
 
-st.image(np.array(final), caption="Simulated Microstructure", channels="GRAY", use_column_width=True)
+st.image(np.array(final), caption="Simulated Microstructure", channels="GRAY", use_container_width=True)
 
 buf = BytesIO()
 final.save(buf, format="PNG")
