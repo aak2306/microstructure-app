@@ -2,7 +2,7 @@ import streamlit as st
 import numpy as np
 from skimage.measure import label, perimeter
 from skimage.draw import ellipse
-from scipy.ndimage import binary_fill_holes
+from scipy.ndimage import binary_fill_holes, gaussian_filter, binary_dilation
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 
@@ -30,37 +30,38 @@ if random_seed != 0:
 width_px, height_px = int(image_width_um * pixel_per_um), int(image_height_um * pixel_per_um)
 canvas = np.zeros((height_px, width_px), dtype=np.uint8)
 
-# Estimate number of particles for desired volume fraction (use shape‑specific area)
+# Estimate number of particles for desired volume fraction
 rad_um = particle_diameter_um / 2
 if shape == "Elliptical":
-    shape_area_um2 = np.pi * rad_um * (0.8 * rad_um)  # average ry ≈ 0.8 r
+    shape_area_um2 = np.pi * rad_um * (0.8 * rad_um)
 elif shape == "Irregular (Blob)":
-    shape_area_um2 = np.pi * rad_um**2 * 1.2          # blobs a bit larger on avg
+    shape_area_um2 = np.pi * rad_um**2 * 1.2
 else:
     shape_area_um2 = np.pi * rad_um**2
 
 area_target_um2 = image_width_um * image_height_um * (volume_fraction / 100)
 num_particles = max(1, int(area_target_um2 / shape_area_um2))
 
-# Convert typical radius to px for placement boundaries
 avg_rad_px = int(rad_um * pixel_per_um)
-
 pil_img = Image.fromarray(canvas)
 d = ImageDraw.Draw(pil_img)
 
-# --- Particle Generation (simple non‑overlap rejection to improve homogeneity) ---
+# --- Particle Generation ---
 placed_centers = []
 max_attempts = num_particles * 10
 attempts = 0
+
 while len(placed_centers) < num_particles and attempts < max_attempts:
     attempts += 1
     cx = np.random.randint(avg_rad_px, width_px - avg_rad_px)
     cy = np.random.randint(avg_rad_px, height_px - avg_rad_px)
-    # Ensure new center not too close to existing (Poisson‑like)
+
     if all((cx - x)**2 + (cy - y)**2 > (2*avg_rad_px)**2 for x, y in placed_centers):
         r_px = int(avg_rad_px * (1 + np.random.uniform(-0.3, 0.3)))
+
         if shape == "Circular":
             d.ellipse([cx - r_px, cy - r_px, cx + r_px, cy + r_px], fill=255)
+
         elif shape == "Mixed (Circular + Elliptical + Irregular)":
             rand_val = np.random.rand()
             if rand_val < mix_ratio / 100:
@@ -70,7 +71,6 @@ while len(placed_centers) < num_particles and attempts < max_attempts:
                 ry = int(r_px * np.random.uniform(0.5, 1.2))
                 d.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=255)
             else:
-                from scipy.ndimage import gaussian_filter, binary_dilation
                 blob_size = 2 * r_px
                 noise = np.random.rand(blob_size, blob_size)
                 blurred = gaussian_filter(noise, sigma=blob_size * 0.1)
@@ -91,62 +91,39 @@ while len(placed_centers) < num_particles and attempts < max_attempts:
                     temp_canvas[top:top+bh, left:left+bw] = combined
                     pil_img = Image.fromarray(temp_canvas)
                     d = ImageDraw.Draw(pil_img)
-        elif shape == "Elliptical":
-                    from scipy.ndimage import gaussian_filter, binary_dilation
-                    blob_size = 2 * r_px
-                    noise = np.random.rand(blob_size, blob_size)
-                    blurred = gaussian_filter(noise, sigma=blob_size * 0.1)
-                    threshold = 0.45
-                    mask = (blurred > threshold).astype(np.uint8)
-                    mask = binary_dilation(mask, iterations=2).astype(np.uint8) * 255
-                    blob_img = Image.fromarray(mask)
-                    angle = np.random.rand() * 360
-                    blob_img = blob_img.rotate(angle, expand=True, fillcolor=0)
-                    blob_arr = np.array(blob_img)
-                    bh, bw = blob_arr.shape
-                    top = cy - bh // 2
-                    left = cx - bw // 2
-                    temp_canvas = np.array(pil_img)
-                    if 0 <= top and top + bh <= height_px and 0 <= left and left + bw <= width_px:
-                        temp_crop = temp_canvas[top:top+bh, left:left+bw]
-                        combined = np.maximum(temp_crop, blob_arr)
-                        temp_canvas[top:top+bh, left:left+bw] = combined
-                        pil_img = Image.fromarray(temp_canvas)
-                        d = ImageDraw.Draw(pil_img)
-            else:
-                d.ellipse([cx - r_px, cy - r_px, cx + r_px, cy + r_px], fill=255)
-            from scipy.ndimage import gaussian_filter, binary_dilation
 
+        elif shape == "Elliptical":
+            rx = r_px
+            ry = int(r_px * np.random.uniform(0.5, 1.2))
+            d.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=255)
+
+        elif shape == "Irregular (Blob)":
             blob_size = 2 * r_px
             noise = np.random.rand(blob_size, blob_size)
             blurred = gaussian_filter(noise, sigma=blob_size * 0.1)
-            threshold = 0.45  # lower = thicker
+            threshold = 0.45
             mask = (blurred > threshold).astype(np.uint8)
             mask = binary_dilation(mask, iterations=2).astype(np.uint8) * 255
-
             blob_img = Image.fromarray(mask)
             angle = np.random.rand() * 360
             blob_img = blob_img.rotate(angle, expand=True, fillcolor=0)
             blob_arr = np.array(blob_img)
-
             bh, bw = blob_arr.shape
             top = cy - bh // 2
             left = cx - bw // 2
-
             temp_canvas = np.array(pil_img)
-            if 0 <= top < height_px - bh and 0 <= left < width_px - bw:
+            if 0 <= top and top + bh <= height_px and 0 <= left and left + bw <= width_px:
                 temp_crop = temp_canvas[top:top+bh, left:left+bw]
                 combined = np.maximum(temp_crop, blob_arr)
                 temp_canvas[top:top+bh, left:left+bw] = combined
                 pil_img = Image.fromarray(temp_canvas)
                 d = ImageDraw.Draw(pil_img)
-                d = ImageDraw.Draw(pil_img)
-            d = ImageDraw.Draw(pil_img)
+
         placed_centers.append((cx, cy))
 
 canvas = np.array(pil_img)
 
-# --- Create composite with separate white scale‑box ---
+# --- Draw scale bar below image ---
 scale_um = image_width_um / 5
 scale_px = int(scale_um * pixel_per_um)
 bar_h = max(4, int(0.01 * height_px))
