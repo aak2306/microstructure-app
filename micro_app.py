@@ -65,13 +65,17 @@ while len(placed_centers) < num_particles and attempts < max_attempts:
             ry = int(r_px * np.random.uniform(0.5, 1.2))
             d.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=255)
         else:  # Irregular blob
-            rr, cc = ellipse(cx, cy, r_px, int(0.6*r_px), shape=canvas.shape)
-            blob = np.zeros_like(canvas)
-            blob[rr, cc] = 255
+            pad = 2 * r_px
+            blob_canvas = np.zeros((height_px + 2 * pad, width_px + 2 * pad), dtype=np.uint8)
+            rr, cc = ellipse(cy + pad, cx + pad, r_px, int(0.6 * r_px), shape=blob_canvas.shape)
+            blob_canvas[rr, cc] = 255
+
             angle = np.random.rand() * 360
-            blob_img = Image.fromarray(blob)
-            blob_img = blob_img.rotate(angle, expand=False)
-            pil_img = Image.fromarray(np.maximum(np.array(pil_img), np.array(blob_img)))
+            blob_img = Image.fromarray(blob_canvas)
+            blob_img = blob_img.rotate(angle, expand=False, fillcolor=0)
+            blob_cropped = np.array(blob_img)[pad:-pad, pad:-pad]  # center-crop back to image size
+
+            pil_img = Image.fromarray(np.maximum(np.array(pil_img), blob_cropped))
             d = ImageDraw.Draw(pil_img)
         placed_centers.append((cx, cy))
 
@@ -93,7 +97,7 @@ draw_final.rectangle([bar_x1, bar_y1, bar_x1 + scale_px, bar_y1 + bar_h], fill=0
 
 scale_label = f"{int(scale_um)} μm"
 try:
-    font = ImageFont.truetype("DejaVuSans.ttf", 15)
+    font = ImageFont.truetype("DejaVuSans.ttf", 18)
 except:
     font = ImageFont.load_default()
 
