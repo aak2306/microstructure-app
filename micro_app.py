@@ -91,9 +91,9 @@ bar_x1 = (width_px - scale_px) // 2
 bar_y1 = height_px + 8
 draw_final.rectangle([bar_x1, bar_y1, bar_x1 + scale_px, bar_y1 + bar_h], fill=0)
 
-scale_label = f"{int(scale_um)} µm"
+scale_label = f"{int(scale_um)} μm"
 try:
-    font = ImageFont.truetype("arial.ttf", 18)
+    font = ImageFont.truetype("DejaVuSans.ttf", 18)
 except:
     font = ImageFont.load_default()
 
