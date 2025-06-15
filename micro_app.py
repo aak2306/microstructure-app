@@ -65,17 +65,27 @@ while len(placed_centers) < num_particles and attempts < max_attempts:
             ry = int(r_px * np.random.uniform(0.5, 1.2))
             d.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=255)
         else:  # Irregular blob
-            pad = 2 * r_px
-            blob_canvas = np.zeros((height_px + 2 * pad, width_px + 2 * pad), dtype=np.uint8)
-            rr, cc = ellipse(cy + pad, cx + pad, r_px, int(0.6 * r_px), shape=blob_canvas.shape)
-            blob_canvas[rr, cc] = 255
+            blob_size = 2 * r_px
+            noise = np.random.rand(blob_size, blob_size)
+            mask = (binary_fill_holes(noise > 0.6)).astype(np.uint8) * 255
 
+            blob_img = Image.fromarray(mask)
             angle = np.random.rand() * 360
-            blob_img = Image.fromarray(blob_canvas)
-            blob_img = blob_img.rotate(angle, expand=False, fillcolor=0)
-            blob_cropped = np.array(blob_img)[pad:-pad, pad:-pad]  # center-crop back to image size
+            blob_img = blob_img.rotate(angle, expand=True, fillcolor=0)
+            blob_arr = np.array(blob_img)
 
-            pil_img = Image.fromarray(np.maximum(np.array(pil_img), blob_cropped))
+            # Get shape and paste safely
+            bh, bw = blob_arr.shape
+            top = cy - bh // 2
+            left = cx - bw // 2
+
+            temp_canvas = np.array(pil_img)
+            if 0 <= top < height_px - bh and 0 <= left < width_px - bw:
+                temp_crop = temp_canvas[top:top+bh, left:left+bw]
+                combined = np.maximum(temp_crop, blob_arr)
+                temp_canvas[top:top+bh, left:left+bw] = combined
+                pil_img = Image.fromarray(temp_canvas)
+                d = ImageDraw.Draw(pil_img)
             d = ImageDraw.Draw(pil_img)
         placed_centers.append((cx, cy))
 
