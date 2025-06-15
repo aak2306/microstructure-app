@@ -79,7 +79,9 @@ try:
 except:
     font = ImageFont.load_default()
 
-text_width, text_height = font.getsize(info_text)
+bbox = draw.textbbox((0, 0), info_text, font=font)
+text_width = bbox[2] - bbox[0]
+text_height = bbox[3] - bbox[1]
 text_x = (image_width_px - text_width) // 2
 text_y = image_height_px + (info_box_height - text_height) // 2
 
