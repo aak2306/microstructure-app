@@ -1,6 +1,5 @@
 import streamlit as st
 import numpy as np
-import matplotlib.pyplot as plt
 from skimage.measure import label, perimeter
 from skimage.draw import ellipse
 from scipy.ndimage import binary_fill_holes
@@ -15,112 +14,109 @@ col1, col2 = st.columns(2)
 with col1:
     image_width_um = st.number_input("Image Width (µm)", 50.0, 1000.0, 200.0)
     particle_diameter_um = st.number_input("Avg. Particle Diameter (µm)", 1.0, 100.0, 10.0)
-    pixel_per_um = st.slider("Pixels per Micron", 1, 10, 2)
+    pixel_per_um = st.slider("Pixels per Micron (resolution)", 1, 10, 3)
+    random_seed = st.number_input("Random Seed (0 = random)", 0, 9999, 0)
 with col2:
     image_height_um = st.number_input("Image Height (µm)", 50.0, 1000.0, 200.0)
     volume_fraction = st.slider("Volume Fraction (%)", 1, 99, 20)
     shape = st.selectbox("Particle Shape", ["Circular", "Elliptical", "Irregular (Blob)"])
 
-random_seed = 42
-np.random.seed(random_seed)
+# --- RNG Setup ---
+if random_seed != 0:
+    np.random.seed(random_seed)
 
-# --- Derived Quantities ---
-image_width_px = int(image_width_um * pixel_per_um)
-image_height_px = int(image_height_um * pixel_per_um)
-image = np.zeros((image_height_px, image_width_px), dtype=np.uint8)
+# --- Derived Sizes ---
+width_px, height_px = int(image_width_um * pixel_per_um), int(image_height_um * pixel_per_um)
+canvas = np.zeros((height_px, width_px), dtype=np.uint8)
 
-particle_radius_um = particle_diameter_um / 2
-particle_area_um2 = np.pi * particle_radius_um**2
-image_area_um2 = image_width_um * image_height_um
-num_particles = int((volume_fraction / 100.0) * image_area_um2 / particle_area_um2)
-avg_radius_px = int(particle_radius_um * pixel_per_um)
+# Estimate number of particles for desired volume fraction (use shape‑specific area)
+rad_um = particle_diameter_um / 2
+if shape == "Elliptical":
+    shape_area_um2 = np.pi * rad_um * (0.8 * rad_um)  # average ry ≈ 0.8 r
+elif shape == "Irregular (Blob)":
+    shape_area_um2 = np.pi * rad_um**2 * 1.2          # blobs a bit larger on avg
+else:
+    shape_area_um2 = np.pi * rad_um**2
 
-# --- Particle Generation ---
-pil_image = Image.fromarray(image)
-draw = ImageDraw.Draw(pil_image)
+area_target_um2 = image_width_um * image_height_um * (volume_fraction / 100)
+num_particles = max(1, int(area_target_um2 / shape_area_um2))
 
-for _ in range(num_particles):
-    x = np.random.randint(avg_radius_px, image_width_px - avg_radius_px)
-    y = np.random.randint(avg_radius_px, image_height_px - avg_radius_px)
-    r = int(avg_radius_px * (1 + np.random.uniform(-0.3, 0.3)))
+# Convert typical radius to px for placement boundaries
+avg_rad_px = int(rad_um * pixel_per_um)
 
-    if shape == "Circular":
-        draw.ellipse([x - r, y - r, x + r, y + r], fill=255)
+pil_img = Image.fromarray(canvas)
+d = ImageDraw.Draw(pil_img)
 
-    elif shape == "Elliptical":
-        rx = int(r)
-        ry = int(r * np.random.uniform(0.5, 1.5))
-        draw.ellipse([x - rx, y - ry, x + rx, y + ry], fill=255)
+# --- Particle Generation (simple non‑overlap rejection to improve homogeneity) ---
+placed_centers = []
+max_attempts = num_particles * 10
+attempts = 0
+while len(placed_centers) < num_particles and attempts < max_attempts:
+    attempts += 1
+    cx = np.random.randint(avg_rad_px, width_px - avg_rad_px)
+    cy = np.random.randint(avg_rad_px, height_px - avg_rad_px)
+    # Ensure new center not too close to existing (Poisson‑like)
+    if all((cx - x)**2 + (cy - y)**2 > (2*avg_rad_px)**2 for x, y in placed_centers):
+        r_px = int(avg_rad_px * (1 + np.random.uniform(-0.3, 0.3)))
+        if shape == "Circular":
+            d.ellipse([cx - r_px, cy - r_px, cx + r_px, cy + r_px], fill=255)
+        elif shape == "Elliptical":
+            rx = r_px
+            ry = int(r_px * np.random.uniform(0.5, 1.2))
+            d.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=255)
+        else:  # Irregular blob
+            rr, cc = ellipse(cx, cy, r_px, int(0.6*r_px), shape=canvas.shape)
+            blob = np.zeros_like(canvas)
+            blob[rr, cc] = 255
+            angle = np.random.rand() * 360
+            blob_img = Image.fromarray(blob)
+            blob_img = blob_img.rotate(angle, expand=False)
+            pil_img = Image.fromarray(np.maximum(np.array(pil_img), np.array(blob_img)))
+            d = ImageDraw.Draw(pil_img)
+        placed_centers.append((cx, cy))
 
-    elif shape == "Irregular (Blob)":
-        rr, cc = ellipse(x, y, r, r // 2, shape=image.shape)
-        blob = np.zeros_like(image)
-        blob[rr, cc] = 1
-        blob = binary_fill_holes(blob).astype(np.uint8) * 255
-        image = np.maximum(np.array(pil_image), blob.astype(np.uint8))
-        pil_image = Image.fromarray(image)
-        draw = ImageDraw.Draw(pil_image)
+canvas = np.array(pil_img)
 
-# --- Create White Box for Scale Bar Below ---
-scale_bar_um = image_width_um / 5
-scale_bar_px = int(scale_bar_um * pixel_per_um)
-bar_thickness = max(3, int(0.01 * image_height_px))
-bar_margin = 10
-label_gap = 5
-scale_box_height = bar_thickness + label_gap + 20
+# --- Create composite with separate white scale‑box ---
+scale_um = image_width_um / 5
+scale_px = int(scale_um * pixel_per_um)
+bar_h = max(4, int(0.01 * height_px))
+box_h = bar_h + 30
+final = Image.new("L", (width_px, height_px + box_h), color=255)
+final.paste(pil_img, (0, 0))
 
-# Create a new image with extra space below
-final_image = Image.new("L", (image_width_px, image_height_px + scale_box_height), color=255)
-final_image.paste(pil_image, (0, 0))
+# Draw scale bar
+draw_final = ImageDraw.Draw(final)
+bar_x1 = (width_px - scale_px) // 2
+bar_y1 = height_px + 8
+draw_final.rectangle([bar_x1, bar_y1, bar_x1 + scale_px, bar_y1 + bar_h], fill=0)
 
-# Draw scale bar in bottom center
-draw = ImageDraw.Draw(final_image)
-x1 = (image_width_px - scale_bar_px) // 2
-x2 = x1 + scale_bar_px
-y1 = image_height_px + bar_margin
-y2 = y1 + bar_thickness
-
-# Draw the bar
-draw.rectangle([x1, y1, x2, y2], fill=0)
-
-# Label below the bar
-label_text = f"{int(scale_bar_um)} µm"
-font_size = 16
+label = f"{int(scale_um)} µm"
 try:
-    font = ImageFont.truetype("arial.ttf", font_size)
+    font = ImageFont.truetype("arial.ttf", 14)
 except:
     font = ImageFont.load_default()
 
-bbox = draw.textbbox((0, 0), label_text, font=font)
-text_width = bbox[2] - bbox[0]
-text_height = bbox[3] - bbox[1]
-text_x = (image_width_px - text_width) // 2
-text_y = y2 + label_gap
+bbox = draw_final.textbbox((0, 0), label, font=font)
+text_w = bbox[2] - bbox[0]
+text_x = (width_px - text_w) // 2
+text_y = bar_y1 + bar_h + 4
+draw_final.text((text_x, text_y), label, fill=0, font=font)
 
-# Draw text in black
-draw.text((text_x, text_y), label_text, fill=0, font=font)
+# --- Metrics ---
+binary = canvas > 0
+labels = label(binary)
+interface_px = np.sum([perimeter(labels == i) for i in range(1, labels.max()+1)])
+interface_um = interface_px / pixel_per_um
+ratio = interface_um / (image_width_um * image_height_um)
 
-image = np.array(final_image)
-
-# --- Analysis ---
-binary = image[:image_height_px, :] > 0
-labeled = label(binary)
-interface_length_px = np.sum([perimeter(labeled == i) for i in range(1, labeled.max()+1)])
-interface_length_um = interface_length_px / pixel_per_um
-ratio = interface_length_um / image_area_um2
-
-# --- Output ---
+# --- Streamlit Display ---
 st.markdown("""---""")
 st.subheader("Results")
-st.write(f"**Image Area:** {image_area_um2:.2f} µm²") 
-st.write(f"**Particles Generated:** {num_particles}")
-st.write(f"**Interfacial Length:** {interface_length_um:.2f} µm") 
-st.write(f"**Interface/Area Ratio:** {ratio:.5f} µm⁻¹")
+st.write(f"**Particles Placed:** {len(placed_centers)} | **Interfacial Length:** {interface_um:.2f} µm | **Interface/Area:** {ratio:.5f} µm⁻¹")
 
-# --- Image Display ---
-st.image(image, caption="Simulated Microstructure", channels="GRAY")
+st.image(np.array(final), caption="Simulated Microstructure", channels="GRAY", use_column_width=True)
 
-# --- Download ---
 buf = BytesIO()
-Image.fromarray(image).save(buf, format="PNG")
-st.download_button("Download Image (PNG)", data=buf.getvalue(), file_name="microstructure.png", mime="image/png")
+final.save(buf, format="PNG")
+st.download_button("Download PNG", data=buf.getvalue(), file_name="microstructure.png", mime="image/png")
