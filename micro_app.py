@@ -5,7 +5,7 @@ from skimage.measure import label, perimeter
 from skimage.draw import ellipse
 from scipy.ndimage import binary_fill_holes
 from io import BytesIO
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 st.set_page_config(page_title="Microstructure Generator", layout="centered")
 st.title("Microstructure Interface Area Calculator")
@@ -60,6 +60,26 @@ for _ in range(num_particles):
         image = np.maximum(np.array(pil_image), blob.astype(np.uint8))
         pil_image = Image.fromarray(image)
         draw = ImageDraw.Draw(pil_image)
+
+# --- Add Scale Bar ---
+scale_bar_um = image_width_um / 5  # 1/5 of the image width in microns
+scale_bar_px = int(scale_bar_um * pixel_per_um)
+bar_height = int(0.015 * image_height_px)
+margin = 10
+
+x1 = image_width_px - scale_bar_px - margin
+y1 = image_height_px - bar_height - margin
+x2 = image_width_px - margin
+y2 = image_height_px - margin
+
+draw.rectangle([x1, y1, x2, y2], fill=0)
+label_text = f"{int(scale_bar_um)} µm"
+font_size = 12
+try:
+    font = ImageFont.truetype("arial.ttf", font_size)
+except:
+    font = ImageFont.load_default()
+draw.text((x1, y1 - 15), label_text, fill=0, font=font)
 
 image = np.array(pil_image)
 
