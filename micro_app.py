@@ -16,6 +16,7 @@ with col1:
     image_width_um = st.number_input("Image Width (µm)", 50.0, 1000.0, 200.0)
     particle_diameter_um = st.number_input("Avg. Particle Diameter (µm)", min_value=0.1, max_value=100.0, value=10.0, step=0.1, format="%.1f")
     pixel_per_um = st.slider("Pixels per Micron", min_value=1, max_value=100, value=10, step=1)
+    size_var_pct = st.number_input("Size variation ± (%)", min_value=0.0, max_value=50.0, value=5.0, step=0.1, format="%.1f")
     rng_seed = st.number_input("Random Seed (0=random)", 0, 9999, 0)
 with col2:
     image_height_um = st.number_input("Image Height (µm)", 50.0, 1000.0, 200.0)
@@ -117,7 +118,8 @@ while len(centers) < num_particles and attempts < max_attempts:
     if (not allow_overlap) and any((cx-x)**2 + (cy-y)**2 < (1.8*avg_rad_px)**2 for x,y in centers):
         continue
 
-    r_px = int(avg_rad_px * (1 + np.random.uniform(-0.05, 0.05)))
+    variation = size_var_pct / 100.0
+    r_px = int(avg_rad_px * (1 + np.random.uniform(-variation, variation)))
 
     placed = False
     if shape == "Circular":
