@@ -149,8 +149,7 @@ while len(centers) < num_particles and attempts < max_attempts:
             progress_text.text(f"Placing particles: {pct}%")
 
 progress_bar.progress(1.0)
-progress_bar.empty()
-progress_text.empty()
+progress_text.text("Rendering results ...")
 canvas = np.array(pil_img)
 
 # --- Scale bar ---
@@ -195,3 +194,7 @@ st.image(np.array(final), caption="Simulated Microstructure", channels="GRAY", u
 buf = BytesIO()
 final.save(buf, format="PNG")
 st.download_button("Download PNG", data=buf.getvalue(), file_name="microstructure.png", mime="image/png")
+
+# --- Finish progress bar ---
+progress_bar.empty()
+progress_text.empty(), file_name="microstructure.png", mime="image/png")
