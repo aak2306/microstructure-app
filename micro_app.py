@@ -140,13 +140,17 @@ def paste_blob(center_x, center_y, r_px):
     left = center_x - bw // 2
     if top < 0 or left < 0 or top + bh > height_px or left + bw > width_px:
         return False
-    temp_canvas = np.array(pil_img)
+    temp_progress.progress(1.0)
+progress.empty()
+
+canvas = np.array(pil_img)
     crop = temp_canvas[top:top + bh, left:left + bw]
     temp_canvas[top:top + bh, left:left + bw] = np.maximum(crop, blob_arr)
     pil_img.paste(Image.fromarray(temp_canvas))
     return True
 
 # --- Particle placement ---
+progress = st.progress(0.0)
 centers = []
 max_attempts = int(num_particles * (100 if volume_fraction > 80 else 20))
 attempts = 0
@@ -183,6 +187,8 @@ while len(centers) < num_particles and attempts < max_attempts:
 
     if placed:
         centers.append((cx, cy))
+        if len(centers) % 100 == 0 or len(centers) == num_particles:
+            progress.progress(min(len(centers)/num_particles, 1.0))
 
 canvas = np.array(pil_img)
 
