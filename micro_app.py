@@ -49,12 +49,12 @@ draw = ImageDraw.Draw(pil_img)
 # --- Helper: generate irregular blob ---
 def paste_blob(center_x, center_y, r_px):
     blob_size = 2 * r_px
-    noise = np.random.rand(blob_size, blob_size)
-    blurred = gaussian_filter(noise, sigma=blob_size * 0.1)
-    threshold = 0.45
-    mask = (blurred > threshold).astype(np.uint8)
-    mask = binary_dilation(mask, iterations=2).astype(np.uint8) * 255
-    blob_img = PILImage.fromarray(mask)
+    base = np.random.rand(blob_size, blob_size)
+    blur1 = gaussian_filter(base, sigma=blob_size * 0.15)
+    mask = (blur1 > 0.5).astype(np.uint8)
+    mask = gaussian_filter(mask.astype(float), sigma=1.2) > 0.3
+    blob_arr = (mask * 255).astype(np.uint8)
+    blob_img = PILImage.fromarray(blob_arr)
     blob_img = blob_img.rotate(np.random.rand() * 360, expand=True, fillcolor=0)
     blob_arr = np.array(blob_img)
     bh, bw = blob_arr.shape
