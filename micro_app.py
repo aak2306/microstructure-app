@@ -197,4 +197,4 @@ st.download_button("Download PNG", data=buf.getvalue(), file_name="microstructur
 
 # --- Finish progress bar ---
 progress_bar.empty()
-progress_text.empty(), file_name="microstructure.png", mime="image/png")
+progress_text.empty()
