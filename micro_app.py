@@ -22,6 +22,14 @@ with col2:
     shape = st.selectbox("Particle Shape", ["Circular", "Elliptical", "Irregular (Blob)", "Mixed (Circular + Elliptical + Irregular)"])
 mix_ratio = st.slider("% Circular in Mix", 0, 100, 33) if shape == "Mixed (Circular + Elliptical + Irregular)" else None
 
+# --- Load Predefined Irregular Masks ---
+import os
+from PIL import Image as PILImage
+
+blob_mask_dir = "/mnt/data/blob_masks"
+blob_mask_paths = [os.path.join(blob_mask_dir, f) for f in os.listdir(blob_mask_dir) if f.endswith(".png")]
+blob_masks = [np.array(PILImage.open(path)) for path in blob_mask_paths]
+
 # --- RNG Setup ---
 if random_seed != 0:
     np.random.seed(random_seed)
@@ -35,16 +43,23 @@ rad_um = particle_diameter_um / 2
 if shape == "Elliptical":
     shape_area_um2 = np.pi * rad_um * (0.8 * rad_um)
 elif shape == "Irregular (Blob)":
-    shape_area_um2 = np.pi * rad_um**2 * 1.2
-else:
-    shape_area_um2 = np.pi * rad_um**2
+            blob_raw = np.array(PILImage.fromarray(blob_masks[np.random.randint(len(blob_masks))]))
+            scale = np.random.uniform(0.5, 1.5)
+            new_size = (int(blob_raw.shape[1] * scale), int(blob_raw.shape[0] * scale))
+            blob_resized = np.array(PILImage.fromarray(blob_raw).resize(new_size, resample=PILImage.BILINEAR))
+            blob_img = PILImage.fromarray(blob_resized).rotate(np.random.rand() * 360, expand=True, fillcolor=0)
+            blob_arr = np.array(blob_img)
 
-area_target_um2 = image_width_um * image_height_um * (volume_fraction / 100)
-num_particles = max(1, int(area_target_um2 / shape_area_um2))
-
-avg_rad_px = int(rad_um * pixel_per_um)
-pil_img = Image.fromarray(canvas)
-d = ImageDraw.Draw(pil_img)
+            bh, bw = blob_arr.shape
+            top = cy - bh // 2
+            left = cx - bw // 2
+            temp_canvas = np.array(pil_img)
+            if 0 <= top and top + bh <= height_px and 0 <= left and left + bw <= width_px:
+                temp_crop = temp_canvas[top:top+bh, left:left+bw]
+                combined = np.maximum(temp_crop, blob_arr)
+                temp_canvas[top:top+bh, left:left+bw] = combined
+                pil_img = Image.fromarray(temp_canvas)
+                d = ImageDraw.Draw(pil_img)
 
 # --- Particle Generation ---
 placed_centers = []
