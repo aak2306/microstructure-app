@@ -28,6 +28,11 @@ allow_overlap = st.checkbox("Allow particle overlap", value=False)
 mix_ratio = (st.slider("% Circular in Mix", 0, 100, 33)
              if shape == "Mixed (Circular + Elliptical + Irregular)" else None)
 
+# --- Run trigger ---
+calculate = st.button("Calculate")
+if not calculate:
+    st.stop()
+
 # --- RNG ---
 if rng_seed:
     np.random.seed(int(rng_seed))
