@@ -213,6 +213,18 @@ interface_px = np.sum([perimeter(labels==i) for i in range(1, labels.max()+1)])
 interface_um = interface_px/pixel_per_um
 ratio = interface_um/(image_width_um*image_height_um)
 
+# --- Postprocessing for SEM-like realism ---
+from skimage.util import random_noise
+from scipy.ndimage import gaussian_filter
+
+sem_like = Image.fromarray(canvas.astype(np.uint8))
+sem_array = np.array(sem_like).astype(np.float32) / 255.0
+sem_array = gaussian_filter(sem_array, sigma=0.6)  # soften edges
+sem_array = random_noise(sem_array, mode='gaussian', var=0.0025)  # speckle noise
+sem_array = (sem_array * 255).astype(np.uint8)
+sem_image = Image.fromarray(sem_array)
+final.paste(sem_image, (0, 0))
+
 # --- Display ---
 st.markdown("---")
 st.subheader("Results")
