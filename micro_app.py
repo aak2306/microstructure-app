@@ -105,7 +105,8 @@ def paste_blob(center_x, center_y, r_px):
     return True
 
 # --- Particle placement ---
-progress = st.progress(0.0)
+progress_bar = st.progress(0.0)
+progress_text = st.empty()
 centers = []
 max_attempts = int(num_particles * (100 if volume_fraction > 80 else 20))
 attempts = 0
@@ -143,8 +144,12 @@ while len(centers) < num_particles and attempts < max_attempts:
     if placed:
         centers.append((cx, cy))
         if len(centers) % 100 == 0 or len(centers) == num_particles:
-            progress.progress(min(len(centers)/num_particles, 1.0))
+            pct = int(100 * len(centers) / num_particles)
+            progress_bar.progress(pct / 100)
+            progress_text.text(f"Placing particles: {pct}%")
 
+progress_bar.progress(1.0)
+progress_text.text("Done!")
 canvas = np.array(pil_img)
 
 # --- Scale bar ---
