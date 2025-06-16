@@ -30,15 +30,8 @@ mix_ratio = (st.slider("% Circular in Mix", 0, 100, 33)
 if rng_seed:
     np.random.seed(int(rng_seed))
 
-# --- Load irregular masks (optional) ---
-project_dir = os.path.dirname(__file__)
-mask_dir_local = os.path.join(project_dir, "blob_masks")
-mask_dir_cloud = "/mount/data/blob_masks"
-mask_dir = mask_dir_local if os.path.isdir(mask_dir_local) else mask_dir_cloud
+# --- Irregular mask generation disabled ---
 blob_masks = []
-if os.path.isdir(mask_dir):
-    blob_masks = [np.array(PILImage.open(os.path.join(mask_dir, f)))
-                  for f in os.listdir(mask_dir) if f.endswith(".png")]
 
 # --- Derived sizes ---
 width_px, height_px = int(image_width_um * pixel_per_um), int(image_height_um * pixel_per_um)
@@ -53,24 +46,26 @@ avg_rad_px = max(1, int(rad_um * pixel_per_um))
 pil_img = Image.fromarray(canvas)
 draw = ImageDraw.Draw(pil_img)
 
-# --- Helper: paste irregular blob mask ---
+# --- Helper: generate irregular blob ---
 def paste_blob(center_x, center_y, r_px):
-    if not blob_masks:
-        return False  # no masks available
-    blob = blob_masks[np.random.randint(len(blob_masks))]
-    scale = np.random.uniform(0.5, 1.5)
-    new_size = (max(1, int(blob.shape[1]*scale)), max(1, int(blob.shape[0]*scale)))
-    blob_resized = np.array(PILImage.fromarray(blob).resize(new_size, PILImage.BILINEAR))
-    blob_rot = np.array(PILImage.fromarray(blob_resized).rotate(np.random.rand()*360, expand=True, fillcolor=0))
-    bh, bw = blob_rot.shape
-    top = center_y - bh//2
-    left = center_x - bw//2
+    blob_size = 2 * r_px
+    noise = np.random.rand(blob_size, blob_size)
+    blurred = gaussian_filter(noise, sigma=blob_size * 0.1)
+    threshold = 0.45
+    mask = (blurred > threshold).astype(np.uint8)
+    mask = binary_dilation(mask, iterations=2).astype(np.uint8) * 255
+    blob_img = PILImage.fromarray(mask)
+    blob_img = blob_img.rotate(np.random.rand() * 360, expand=True, fillcolor=0)
+    blob_arr = np.array(blob_img)
+    bh, bw = blob_arr.shape
+    top = center_y - bh // 2
+    left = center_x - bw // 2
     if top < 0 or left < 0 or top+bh > height_px or left+bw > width_px:
-        return False  # out of bounds
-    tmp = np.array(pil_img)
-    region = tmp[top:top+bh, left:left+bw]
-    tmp[top:top+bh, left:left+bw] = np.maximum(region, blob_rot)
-    pil_img.paste(Image.fromarray(tmp))
+        return False
+    temp_canvas = np.array(pil_img)
+    crop = temp_canvas[top:top+bh, left:left+bw]
+    temp_canvas[top:top+bh, left:left+bw] = np.maximum(crop, blob_arr)
+    pil_img.paste(Image.fromarray(temp_canvas))
     return True
 
 # --- Particle placement ---
