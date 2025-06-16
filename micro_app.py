@@ -132,7 +132,9 @@ try:
 except:
     font = ImageFont.load_default()
 
-w, h = draw_final.textsize(label_txt, font=font)
+bbox = draw_final.textbbox((0, 0), label_txt, font=font)
+    w = bbox[2] - bbox[0]
+    h = bbox[3] - bbox[1]
 text_x = (width_px-w)//2
 draw_final.text((text_x, bar_y+bar_h+4), label_txt, font=font, fill=0)
 
