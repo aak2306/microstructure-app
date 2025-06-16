@@ -149,7 +149,8 @@ while len(centers) < num_particles and attempts < max_attempts:
             progress_text.text(f"Placing particles: {pct}%")
 
 progress_bar.progress(1.0)
-progress_text.text("Done!")
+progress_bar.empty()
+progress_text.empty()
 canvas = np.array(pil_img)
 
 # --- Scale bar ---
