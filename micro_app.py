@@ -15,7 +15,7 @@ col1, col2 = st.columns(2)
 with col1:
     image_width_um = st.number_input("Image Width (µm)", 50.0, 1000.0, 200.0)
     particle_diameter_um = st.number_input("Avg. Particle Diameter (µm)", min_value=0.1, max_value=100.0, value=10.0, step=0.1, format="%.1f")
-    pixel_per_um = st.slider("Pixels per Micron", 1, 100, 3)
+    pixel_per_um = st.slider("Pixels per Micron", min_value=1, max_value=100, value=10, step=1)
     rng_seed = st.number_input("Random Seed (0=random)", 0, 9999, 0)
 with col2:
     image_height_um = st.number_input("Image Height (µm)", 50.0, 1000.0, 200.0)
