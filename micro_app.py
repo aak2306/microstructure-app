@@ -26,7 +26,7 @@ mix_ratio = st.slider("% Circular in Mix", 0, 100, 33) if shape == "Mixed (Circu
 import os
 from PIL import Image as PILImage
 
-blob_mask_dir = "/mnt/data/blob_masks"
+blob_mask_dir = os.path.join(os.path.dirname(__file__), "blob_masks") if os.path.isdir(os.path.join(os.path.dirname(__file__), "blob_masks")) else "/mount/data/blob_masks"
 blob_mask_paths = [os.path.join(blob_mask_dir, f) for f in os.listdir(blob_mask_dir) if f.endswith(".png")]
 blob_masks = [np.array(PILImage.open(path)) for path in blob_mask_paths]
 
