@@ -141,13 +141,13 @@ def paste_blob(center_x, center_y, r_px):
 
 # --- Particle placement ---
 centers = []
-max_attempts = num_particles * 20
+max_attempts = int(num_particles * (100 if volume_fraction > 80 else 20))
 attempts = 0
 while len(centers) < num_particles and attempts < max_attempts:
     attempts += 1
     cx = np.random.randint(avg_rad_px, width_px - avg_rad_px)
     cy = np.random.randint(avg_rad_px, height_px - avg_rad_px)
-    if any((cx-x)**2 + (cy-y)**2 < (2*avg_rad_px)**2 for x,y in centers):
+    if any((cx-x)**2 + (cy-y)**2 < (1.8*avg_rad_px)**2 for x,y in centers):
         continue
 
     r_px = int(avg_rad_px * (1 + np.random.uniform(-0.3, 0.3)))
