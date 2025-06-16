@@ -23,6 +23,8 @@ with col2:
     shape = st.selectbox("Particle Shape", [
         "Circular", "Elliptical", "Irregular (Blob)", "Mixed (Circular + Elliptical + Irregular)"])
 
+allow_overlap = st.checkbox("Allow particle overlap", value=False)
+
 mix_ratio = (st.slider("% Circular in Mix", 0, 100, 33)
              if shape == "Mixed (Circular + Elliptical + Irregular)" else None)
 
@@ -147,7 +149,7 @@ while len(centers) < num_particles and attempts < max_attempts:
     attempts += 1
     cx = np.random.randint(avg_rad_px, width_px - avg_rad_px)
     cy = np.random.randint(avg_rad_px, height_px - avg_rad_px)
-    if any((cx-x)**2 + (cy-y)**2 < (1.8*avg_rad_px)**2 for x,y in centers):
+    if (not allow_overlap) and any((cx-x)**2 + (cy-y)**2 < (1.8*avg_rad_px)**2 for x,y in centers):
         continue
 
     r_px = int(avg_rad_px * (1 + np.random.uniform(-0.3, 0.3)))
