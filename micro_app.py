@@ -117,7 +117,7 @@ while len(centers) < num_particles and attempts < max_attempts:
     if (not allow_overlap) and any((cx-x)**2 + (cy-y)**2 < (1.8*avg_rad_px)**2 for x,y in centers):
         continue
 
-    r_px = int(avg_rad_px * (1 + np.random.uniform(-0.3, 0.3)))
+    r_px = int(avg_rad_px * (1 + np.random.uniform(-0.05, 0.05)))
 
     placed = False
     if shape == "Circular":
