@@ -16,13 +16,13 @@ with col1:
     image_width_um = st.number_input("Image Width (µm)", 50.0, 1000.0, 200.0)
     particle_diameter_um = st.number_input("Avg. Particle Diameter (µm)", min_value=0.1, max_value=100.0, value=10.0, step=0.1, format="%.1f")
     pixel_per_um = st.slider("Pixels per Micron", min_value=1, max_value=100, value=10, step=1)
-    size_var_pct = st.number_input("Size variation ± (%)", min_value=0.0, max_value=50.0, value=5.0, step=0.1, format="%.1f")
+    size_variation = st.number_input("Size variation ± (%)", min_value=0.0, max_value=100.0, value=5.0, step=0.1)
     rng_seed = st.number_input("Random Seed (0=random)", 0, 9999, 0)
 with col2:
     image_height_um = st.number_input("Image Height (µm)", 50.0, 1000.0, 200.0)
     volume_fraction = st.number_input("Volume Fraction (%)", min_value=0.1, max_value=99.9, value=20.0, step=0.1, format="%.1f")
     shape = st.selectbox("Particle Shape", [
-        "Circular", "Elliptical", "Irregular (Blob)", "Mixed (Circular + Elliptical + Irregular)"])
+        "Circular", "Elliptical", "Irregular (Blob)", "Rough Spheres", "Cracked Flakes", "Mixed (Circular + Elliptical + Irregular)"])
 
 allow_overlap = st.checkbox("Allow particle overlap", value=False)
 
@@ -38,15 +38,12 @@ if not calculate:
 if rng_seed:
     np.random.seed(int(rng_seed))
 
-# --- Irregular mask generation disabled ---
-blob_masks = []
-
 # --- Derived sizes ---
 width_px, height_px = int(image_width_um * pixel_per_um), int(image_height_um * pixel_per_um)
 canvas = np.zeros((height_px, width_px), dtype=np.uint8)
 
 rad_um = particle_diameter_um / 2
-shape_area_um2 = np.pi * rad_um**2  # rough estimate for all shapes
+shape_area_um2 = np.pi * rad_um**2
 area_target_um2 = image_width_um * image_height_um * volume_fraction / 100
 num_particles = max(1, int(area_target_um2 / shape_area_um2))
 
@@ -56,10 +53,6 @@ draw = ImageDraw.Draw(pil_img)
 
 # --- Helper: generate irregular blob ---
 def paste_blob(center_x, center_y, r_px):
-    """Generate a smooth Bezier blob mask ≈ 2*r_px in diameter and paste it.
-    Returns True if pasted fully in-bounds, else False (so caller can retry).
-    """
-    # --- helper functions for Bezier blob generation ---
     def ccw_sort(p):
         d = p - np.mean(p, axis=0)
         ang = np.arctan2(d[:, 1], d[:, 0])
@@ -75,13 +68,11 @@ def paste_blob(center_x, center_y, r_px):
             out += binom(n, k) * (t ** k)[:, None] * ((1 - t) ** (n - k))[:, None] * ctrl[k]
         return out
 
-    # random control points ~polygon
     ctrl_pts = np.random.randn(6, 2)
     ctrl_pts = ccw_sort(ctrl_pts) * 0.8
-    ctrl_pts = np.vstack([ctrl_pts, ctrl_pts[0]])  # close loop
+    ctrl_pts = np.vstack([ctrl_pts, ctrl_pts[0]])
     curve = bezier(ctrl_pts)
     x, y = curve.T
-    # normalise to bounding box
     x -= x.min(); y -= y.min()
     scale = 2 * r_px / max(x.max(), y.max())
     x *= scale; y *= scale
@@ -97,7 +88,7 @@ def paste_blob(center_x, center_y, r_px):
     top = center_y - bh // 2
     left = center_x - bw // 2
     if top < 0 or left < 0 or top + bh > height_px or left + bw > width_px:
-        return False  # out of bounds, caller will retry
+        return False
 
     temp = np.array(pil_img)
     region = temp[top:top + bh, left:left + bw]
@@ -106,8 +97,7 @@ def paste_blob(center_x, center_y, r_px):
     return True
 
 # --- Particle placement ---
-progress_bar = st.progress(0.0)
-progress_text = st.empty()
+progress = st.progress(0.0)
 centers = []
 max_attempts = int(num_particles * (100 if volume_fraction > 80 else 20))
 attempts = 0
@@ -118,8 +108,8 @@ while len(centers) < num_particles and attempts < max_attempts:
     if (not allow_overlap) and any((cx-x)**2 + (cy-y)**2 < (1.8*avg_rad_px)**2 for x,y in centers):
         continue
 
-    variation = size_var_pct / 100.0
-    r_px = int(avg_rad_px * (1 + np.random.uniform(-variation, variation)))
+    variation_factor = 1 + np.random.uniform(-size_variation/100, size_variation/100)
+    r_px = int(avg_rad_px * variation_factor)
 
     placed = False
     if shape == "Circular":
@@ -131,6 +121,19 @@ while len(centers) < num_particles and attempts < max_attempts:
         placed = True
     elif shape == "Irregular (Blob)":
         placed = paste_blob(cx, cy, r_px)
+    elif shape == "Rough Spheres":
+        angle = np.linspace(0, 2*np.pi, 100)
+        r_mod = r_px * (1 + 0.1 * np.sin(5*angle + np.random.rand()*2*np.pi))
+        x = cx + r_mod * np.cos(angle)
+        y = cy + r_mod * np.sin(angle)
+        draw.polygon(list(zip(x, y)), fill=255)
+        placed = True
+    elif shape == "Cracked Flakes":
+        points = np.random.randn(6, 2)
+        points = points / np.max(np.abs(points)) * r_px
+        points[:,0] += cx; points[:,1] += cy
+        draw.polygon(list(map(tuple, points)), fill=255)
+        placed = True
     else:  # Mixed
         rv = np.random.rand()
         if rv < mix_ratio/100:
@@ -146,12 +149,8 @@ while len(centers) < num_particles and attempts < max_attempts:
     if placed:
         centers.append((cx, cy))
         if len(centers) % 100 == 0 or len(centers) == num_particles:
-            pct = int(100 * len(centers) / num_particles)
-            progress_bar.progress(pct / 100)
-            progress_text.text(f"Placing particles: {pct}%")
+            progress.progress(min(len(centers)/num_particles, 1.0))
 
-progress_bar.progress(1.0)
-progress_text.text("Rendering results ...")
 canvas = np.array(pil_img)
 
 # --- Scale bar ---
@@ -196,7 +195,3 @@ st.image(np.array(final), caption="Simulated Microstructure", channels="GRAY", u
 buf = BytesIO()
 final.save(buf, format="PNG")
 st.download_button("Download PNG", data=buf.getvalue(), file_name="microstructure.png", mime="image/png")
-
-# --- Finish progress bar ---
-progress_bar.empty()
-progress_text.empty()
