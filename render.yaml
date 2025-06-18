@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: microstructure-app
+    env: python
+    plan: free
+    buildCommand: ""
+    startCommand: streamlit run micro_app.py --server.port=8000 --server.enableCORS=false
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10
