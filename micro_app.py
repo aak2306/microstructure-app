@@ -24,6 +24,17 @@ with col2:
     shape = st.selectbox("Particle Shape", [
         "Circular", "Elliptical", "Irregular (Blob)", "Rough Spheres", "Cracked Flakes", "Mixed (Circular + Elliptical + Irregular)"])
 
+# Conditional roughness / jitter sliders
+if shape == "Rough Spheres":
+    bumpiness_pct = st.slider("Bumpiness ± (%)", min_value=0.0, max_value=30.0, value=10.0, step=1.0)
+else:
+    bumpiness_pct = 10.0
+
+if shape == "Cracked Flakes":
+    jitter_pct = st.slider("Edge jitter ± (%)", min_value=0.0, max_value=30.0, value=15.0, step=1.0)
+else:
+    jitter_pct = 15.0
+
 allow_overlap = st.checkbox("Allow particle overlap", value=False)
 
 mix_ratio = (st.slider("% Circular in Mix", 0, 100, 33)
@@ -126,7 +137,7 @@ while len(centers) < num_particles and attempts < max_attempts:
         num_pts = 90
         angles = np.linspace(0, 2*np.pi, num_pts, endpoint=False)
         # Smooth Gaussian‑distributed noise (std≈10%)
-        noise = np.random.normal(0, 0.10, num_pts)
+        noise = np.random.normal(0, bumpiness_pct/100.0, num_pts)
         # Apply a simple low‑pass filter for smoother bumps
         noise = gaussian_filter(noise, sigma=3, mode="wrap")
         radii = r_px * (1 + noise)
@@ -142,7 +153,7 @@ while len(centers) < num_particles and attempts < max_attempts:
         x = cx + radii * np.cos(angles)
         y = cy + radii * np.sin(angles)
         # Slight jitter to create sharper edges
-        jitter = (np.random.rand(n_vert, 2) - 0.5) * (0.15 * r_px)
+        jitter = (np.random.rand(n_vert, 2) - 0.5) * (jitter_pct/100.0 * 2 * r_px)
         poly = list(zip(x + jitter[:,0], y + jitter[:,1]))
         draw.polygon(poly, fill=255)
         placed = True
