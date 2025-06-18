@@ -122,17 +122,29 @@ while len(centers) < num_particles and attempts < max_attempts:
     elif shape == "Irregular (Blob)":
         placed = paste_blob(cx, cy, r_px)
     elif shape == "Rough Spheres":
-        angle = np.linspace(0, 2*np.pi, 100)
-        r_mod = r_px * (1 + 0.1 * np.sin(5*angle + np.random.rand()*2*np.pi))
-        x = cx + r_mod * np.cos(angle)
-        y = cy + r_mod * np.sin(angle)
+        # Generate a circular outline with smooth, random radial perturbations
+        num_pts = 90
+        angles = np.linspace(0, 2*np.pi, num_pts, endpoint=False)
+        # Smooth Gaussian‑distributed noise (std≈10%)
+        noise = np.random.normal(0, 0.10, num_pts)
+        # Apply a simple low‑pass filter for smoother bumps
+        noise = gaussian_filter(noise, sigma=3, mode="wrap")
+        radii = r_px * (1 + noise)
+        x = cx + radii * np.cos(angles)
+        y = cy + radii * np.sin(angles)
         draw.polygon(list(zip(x, y)), fill=255)
         placed = True
     elif shape == "Cracked Flakes":
-        points = np.random.randn(6, 2)
-        points = points / np.max(np.abs(points)) * r_px
-        points[:,0] += cx; points[:,1] += cy
-        draw.polygon(list(map(tuple, points)), fill=255)
+        # Generate an angular polygon mimicking fractured SiC
+        n_vert = np.random.randint(6, 12)  # more vertices for realism
+        angles = np.sort(np.random.rand(n_vert) * 2 * np.pi)
+        radii = r_px * (0.6 + 0.4 * np.random.rand(n_vert))
+        x = cx + radii * np.cos(angles)
+        y = cy + radii * np.sin(angles)
+        # Slight jitter to create sharper edges
+        jitter = (np.random.rand(n_vert, 2) - 0.5) * (0.15 * r_px)
+        poly = list(zip(x + jitter[:,0], y + jitter[:,1]))
+        draw.polygon(poly, fill=255)
         placed = True
     else:  # Mixed
         rv = np.random.rand()
