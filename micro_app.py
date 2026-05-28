@@ -169,6 +169,15 @@ with tab_gen:
             "average radius of an existing particle. Required for very high "
             "volume fractions (≳ 70%).",
         )
+        periodic_boundaries = st.checkbox(
+            "Periodic boundaries (toroidal)",
+            value=False,
+            help="When on, the canvas behaves like a torus: particles can "
+            "sit anywhere (no edge margin), wrap across the image edges, "
+            "and overlap is checked via the minimum image convention. "
+            "Removes the depletion-near-edges bias that makes achieved "
+            "volume fraction undershoot target at large particle sizes.",
+        )
         if shape == gen.ROUGH_SPHERES:
             bumpiness_pct = st.slider(
                 "Bumpiness ± (%)",
@@ -261,6 +270,7 @@ with tab_gen:
             volume_fraction=volume_fraction,
             progress_callback=progress.progress,
             size_sampler=size_sampler,
+            periodic_boundaries=periodic_boundaries,
         )
 
         canvas = np.array(pil_img)
@@ -393,6 +403,7 @@ with tab_gen:
         writer.writerow(["normal_sigma_pct", normal_sigma_pct])
         writer.writerow(["rosin_rammler_shape_n", rr_shape_n])
         writer.writerow(["allow_overlap", allow_overlap])
+        writer.writerow(["periodic_boundaries", periodic_boundaries])
         writer.writerow(["rng_seed", rng_seed])
         writer.writerow(
             ["mix_ratio_pct", mix_ratio if mix_ratio is not None else ""]
@@ -503,6 +514,15 @@ with tab_val:
             key="val_seed",
             help="Sweep is fully deterministic for reproducibility.",
         )
+        val_pbc = st.checkbox(
+            "Periodic boundaries",
+            value=False,
+            key="val_pbc",
+            help="When on, runs the sweep with toroidal placement. Achieved "
+            "φ tracks target closely and the residual error reflects only "
+            "the perimeter estimator's bias — the sharpest test of the "
+            "rasterization pipeline.",
+        )
 
     if st.button("Run validation sweep", type="primary", key="val_run"):
         progress = st.progress(0.0)
@@ -514,6 +534,7 @@ with tab_val:
             phi_targets=phi_targets.tolist(),
             seed=int(val_seed),
             progress_callback=progress.progress,
+            periodic_boundaries=val_pbc,
         )
 
         df = pd.DataFrame(

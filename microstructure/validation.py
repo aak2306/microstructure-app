@@ -65,6 +65,7 @@ def validate_monodisperse_circles(
     phi_targets: Iterable[float],
     seed: int = 0,
     progress_callback: Optional[Callable[[float], None]] = None,
+    periodic_boundaries: bool = False,
 ) -> list[ValidationPoint]:
     """Run a φ sweep and compute L_A_measured vs L_A_theory at each point.
 
@@ -72,6 +73,11 @@ def validate_monodisperse_circles(
     allow_overlap=False — so each particle has exactly the nominal radius
     and the analytical formula applies exactly to whichever particles do
     fit on the canvas.
+
+    ``periodic_boundaries`` toggles the toroidal placement+drawing path.
+    With PBC enabled the achieved φ tracks the target much more closely
+    (no edge-margin depletion), so this is the sharpest test of whether
+    the perimeter measurement itself is unbiased.
     """
     phi_list = [float(p) for p in phi_targets]
     width_px = height_px = int(canvas_um * pixel_per_um)
@@ -98,6 +104,7 @@ def validate_monodisperse_circles(
             jitter_pct=0.0,
             mix_ratio=None,
             volume_fraction=phi * 100.0,
+            periodic_boundaries=periodic_boundaries,
         )
 
         binary = np.array(pil_img) > 0
