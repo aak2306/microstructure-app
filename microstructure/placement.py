@@ -40,12 +40,19 @@ def place_particles(
     mix_ratio: Optional[int],
     volume_fraction: float,
     progress_callback: Optional[Callable[[float], None]] = None,
+    size_sampler: Optional[Callable[[], float]] = None,
 ) -> list[PlacedParticle]:
     """Place ``num_particles`` particles into ``pil_img``.
 
     Returns the list of particles actually placed (as PlacedParticle).
     Mutates ``pil_img``. ``progress_callback`` (if provided) is called with
     a 0..1 fraction every 100 particles and at completion.
+
+    When ``size_sampler`` is provided, it overrides the inline uniform
+    ``size_variation`` jitter — the sampler is called once per placement
+    attempt to draw a fresh radius in pixels. This is how the caller injects
+    non-uniform size distributions (log-normal, etc.) without this module
+    needing to know about them.
     """
     draw = ImageDraw.Draw(pil_img)
     width_px, height_px = pil_img.width, pil_img.height
@@ -64,10 +71,13 @@ def place_particles(
         ):
             continue
 
-        variation_factor = 1 + np.random.uniform(
-            -size_variation / 100, size_variation / 100
-        )
-        r_px = int(avg_rad_px * variation_factor)
+        if size_sampler is not None:
+            r_px = max(1, int(size_sampler()))
+        else:
+            variation_factor = 1 + np.random.uniform(
+                -size_variation / 100, size_variation / 100
+            )
+            r_px = int(avg_rad_px * variation_factor)
 
         placed = False
         if shape == gen.CIRCULAR:

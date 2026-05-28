@@ -14,6 +14,7 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 
+from microstructure import distributions as dist
 from microstructure import generators as gen
 from microstructure.metrics import (
     interface_to_area_ratio_per_um,
@@ -98,15 +99,60 @@ with tab_gen:
         )
 
     with st.expander("Advanced settings"):
-        size_variation = st.number_input(
-            "Size variation ± (%)",
-            min_value=0.0,
-            max_value=100.0,
-            value=5.0,
-            step=0.1,
-            help="Half-width of the uniform distribution around the nominal "
-            "diameter (e.g., 10% means radii in 0.9× to 1.1× of nominal).",
+        size_distribution = st.selectbox(
+            "Size distribution",
+            dist.DISTRIBUTIONS,
+            help="How particle diameters are drawn. The *Avg. Particle "
+            "Diameter* above is the central tendency: arithmetic mean for "
+            "Uniform/Normal, median for Log-normal, characteristic size "
+            "d₆₃ for Rosin-Rammler.",
         )
+        size_variation = 5.0  # Uniform default; overridden by widget below
+        lognormal_sigma_g = 1.5
+        normal_sigma_pct = 10.0
+        rr_shape_n = 2.5
+        if size_distribution == dist.UNIFORM:
+            size_variation = st.number_input(
+                "Size variation ± (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=5.0,
+                step=0.1,
+                help="Half-width of the uniform distribution around the "
+                "nominal diameter (e.g., 10% means radii in 0.9× to 1.1×).",
+            )
+        elif size_distribution == dist.LOG_NORMAL:
+            lognormal_sigma_g = st.number_input(
+                "Geometric std σ_g (dimensionless)",
+                min_value=1.01,
+                max_value=4.0,
+                value=1.5,
+                step=0.05,
+                help="Multiplicative spread. σ_g = 1 is monodisperse; "
+                "typical ball-milled powders sit at 1.3–2.0; very broad "
+                "distributions reach 2.5+. Note σ_ln = ln(σ_g).",
+            )
+        elif size_distribution == dist.NORMAL:
+            normal_sigma_pct = st.number_input(
+                "Standard deviation σ (% of mean)",
+                min_value=0.0,
+                max_value=50.0,
+                value=10.0,
+                step=1.0,
+                help="Arithmetic std as a percentage of the mean diameter. "
+                "Negative samples are clipped to ≥ 1 pixel.",
+            )
+        elif size_distribution == dist.ROSIN_RAMMLER:
+            rr_shape_n = st.number_input(
+                "Shape parameter n",
+                min_value=1.0,
+                max_value=10.0,
+                value=2.5,
+                step=0.1,
+                help="Weibull shape exponent. Smaller n → broader, more "
+                "skewed distribution. Crushed minerals typically n ≈ 1.5–3; "
+                "tighter classifiers reach n ≈ 5+.",
+            )
         rng_seed = st.number_input(
             "Random Seed",
             min_value=-1,
@@ -178,12 +224,28 @@ with tab_gen:
 
         rad_um = particle_diameter_um / 2
         area_factor = gen.expected_area_factor(shape, mix_ratio)
-        shape_area_um2 = np.pi * rad_um**2 * area_factor
+        dist_factor = dist.expected_r2_factor(
+            size_distribution,
+            uniform_pct=size_variation,
+            lognormal_sigma_g=lognormal_sigma_g,
+            normal_sigma_pct=normal_sigma_pct,
+            rr_shape_n=rr_shape_n,
+        )
+        shape_area_um2 = np.pi * rad_um**2 * area_factor * dist_factor
         area_target_um2 = image_width_um * image_height_um * volume_fraction / 100
         num_particles = max(1, int(area_target_um2 / shape_area_um2))
 
         avg_rad_px = max(1, int(rad_um * pixel_per_um))
         pil_img = Image.fromarray(canvas)
+
+        size_sampler = dist.make_size_sampler(
+            size_distribution,
+            float(avg_rad_px),
+            uniform_pct=size_variation,
+            lognormal_sigma_g=lognormal_sigma_g,
+            normal_sigma_pct=normal_sigma_pct,
+            rr_shape_n=rr_shape_n,
+        )
 
         progress = st.progress(0.0)
         particles = place_particles(
@@ -198,6 +260,7 @@ with tab_gen:
             mix_ratio=mix_ratio,
             volume_fraction=volume_fraction,
             progress_callback=progress.progress,
+            size_sampler=size_sampler,
         )
 
         canvas = np.array(pil_img)
@@ -324,7 +387,11 @@ with tab_gen:
         writer.writerow(["particle_diameter_um", particle_diameter_um])
         writer.writerow(["shape", shape])
         writer.writerow(["volume_fraction_target_pct", volume_fraction])
+        writer.writerow(["size_distribution", size_distribution])
         writer.writerow(["size_variation_pct", size_variation])
+        writer.writerow(["lognormal_sigma_g", lognormal_sigma_g])
+        writer.writerow(["normal_sigma_pct", normal_sigma_pct])
+        writer.writerow(["rosin_rammler_shape_n", rr_shape_n])
         writer.writerow(["allow_overlap", allow_overlap])
         writer.writerow(["rng_seed", rng_seed])
         writer.writerow(

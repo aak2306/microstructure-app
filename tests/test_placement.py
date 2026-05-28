@@ -104,6 +104,28 @@ def test_placement_returns_placed_particle_namedtuples():
         assert hasattr(p, "cx") and hasattr(p, "cy") and hasattr(p, "r_px")
 
 
+def test_size_sampler_overrides_uniform_jitter():
+    """When size_sampler is provided, every placed radius should come from
+    it — independent of the size_variation argument."""
+    img = _blank()
+    fixed_r = 7
+    np.random.seed(0)
+    particles = place_particles(
+        pil_img=img,
+        shape=gen.CIRCULAR,
+        num_particles=8,
+        avg_rad_px=fixed_r,
+        size_variation=99.0,  # ignored when size_sampler is set
+        allow_overlap=False,
+        bumpiness_pct=10.0,
+        jitter_pct=15.0,
+        mix_ratio=None,
+        volume_fraction=10.0,
+        size_sampler=lambda: fixed_r,
+    )
+    assert all(p.r_px == fixed_r for p in particles)
+
+
 def test_progress_callback_invoked_at_completion():
     img = _blank()
     seen: list[float] = []
