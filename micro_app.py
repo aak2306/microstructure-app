@@ -18,7 +18,10 @@ from microstructure import generators as gen
 from microstructure.metrics import (
     interface_to_area_ratio_per_um,
     interfacial_length_um,
+    mean_free_path_um,
+    mean_intercept_length_um,
     measured_volume_fraction,
+    specific_surface_area_per_um,
 )
 from microstructure.placement import place_particles
 from microstructure.rendering import add_scale_bar
@@ -203,7 +206,13 @@ final = add_scale_bar(pil_img, image_width_um, image_height_um, pixel_per_um)
 binary = canvas > 0
 interface_um = interfacial_length_um(binary, pixel_per_um)
 ratio = interface_to_area_ratio_per_um(interface_um, image_width_um, image_height_um)
-achieved_vf_pct = measured_volume_fraction(binary) * 100.0
+achieved_vf = measured_volume_fraction(binary)
+achieved_vf_pct = achieved_vf * 100.0
+
+# 3D estimates from the 2D measurements (IUR-section assumption).
+s_v_per_um = specific_surface_area_per_um(ratio)
+mean_intercept_particles_um = mean_intercept_length_um(achieved_vf, s_v_per_um)
+mean_free_path_matrix_um = mean_free_path_um(achieved_vf, s_v_per_um)
 
 # ---------------------------------------------------------------------------
 # Results
@@ -235,11 +244,39 @@ col_b.metric(
     "stereological assumptions this equals the 3D volume fraction.",
 )
 col_b.metric(
-    "Interface / Area",
+    "Interface / Area (L_A)",
     f"{ratio:.5f} µm⁻¹",
     help="Interfacial length divided by image area. A direct, "
     "resolution-independent measure of how finely the microstructure is "
-    "subdivided.",
+    "subdivided. Standard symbol in stereology: L_A.",
+)
+
+st.markdown("##### 3D estimates from the 2D section")
+st.caption(
+    "Assumes the image is an isotropic uniform random (IUR) section through "
+    "a 3D structure (Underwood, 1970). If the image *is* the structure, "
+    "treat these as 2D analogues only."
+)
+col_s1, col_s2, col_s3 = st.columns(3)
+col_s1.metric(
+    "Specific Surface Area (S_V)",
+    f"{s_v_per_um:.5f} µm⁻¹",
+    help="S_V = (4/π) · L_A. Surface area per unit volume in 3D. Drives "
+    "sintering kinetics, gas-solid reaction rates, and catalyst activity.",
+)
+col_s2.metric(
+    "Mean Intercept ⟨L_α⟩",
+    f"{mean_intercept_particles_um:.3f} µm",
+    help="⟨L_α⟩ = 4·V_V / S_V. Mean chord length through a particle along "
+    "a random ray — a characteristic particle size measure that's robust "
+    "to shape.",
+)
+col_s3.metric(
+    "Mean Free Path (λ)",
+    f"{mean_free_path_matrix_um:.3f} µm",
+    help="λ = 4·(1 - V_V) / S_V. Mean chord length through the matrix "
+    "between particle encounters. Classical input to diffusion path "
+    "estimates and dispersion-strengthening models.",
 )
 
 st.image(
@@ -292,7 +329,14 @@ writer.writerow(["particles_requested", num_particles])
 writer.writerow(["particles_placed", len(particles)])
 writer.writerow(["volume_fraction_achieved_pct", round(achieved_vf_pct, 4)])
 writer.writerow(["interfacial_length_um", round(interface_um, 4)])
-writer.writerow(["interface_area_ratio_per_um", round(ratio, 6)])
+writer.writerow(["interface_area_ratio_per_um_L_A", round(ratio, 6)])
+writer.writerow(["specific_surface_area_per_um_S_V", round(s_v_per_um, 6)])
+writer.writerow(
+    ["mean_intercept_length_particles_um", round(mean_intercept_particles_um, 4)]
+)
+writer.writerow(
+    ["mean_free_path_matrix_um", round(mean_free_path_matrix_um, 4)]
+)
 
 dl_col1, dl_col2 = st.columns(2)
 dl_col1.download_button(
