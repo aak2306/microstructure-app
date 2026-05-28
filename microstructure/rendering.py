@@ -17,23 +17,23 @@ _FONT_CANDIDATES = (
 )
 
 
-def _load_label_font(size: int = 18) -> ImageFont.ImageFont:
+def _load_label_font(size: int = 18) -> tuple[ImageFont.ImageFont, bool]:
     """Try real TrueType fonts first, then a size-aware default.
 
-    The original code fell straight through to ``ImageFont.load_default()``,
-    which on older Pillow returns a tiny bitmap font that's nearly unreadable
-    next to a microstructure image. Pillow ≥ 10 supports a size argument on
-    the default, which is good enough as a last resort.
+    Returns ``(font, is_truetype)``. The flag tells the caller whether
+    non-ASCII glyphs (specifically µ) are safe to use — older Pillow's
+    legacy bitmap default font is ASCII-only and would render µ as a
+    missing-glyph box.
     """
     for path in _FONT_CANDIDATES:
         try:
-            return ImageFont.truetype(path, size)
+            return ImageFont.truetype(path, size), True
         except OSError:
             continue
     try:
-        return ImageFont.load_default(size=size)  # Pillow ≥ 10
+        return ImageFont.load_default(size=size), True  # Pillow ≥ 10
     except TypeError:
-        return ImageFont.load_default()
+        return ImageFont.load_default(), False
 
 
 def add_scale_bar(
@@ -73,8 +73,13 @@ def add_scale_bar(
         [bar_x1, bar_y, bar_x1 + scale_px, bar_y + bar_h], fill=0
     )
 
-    label_txt = f"{int(scale_um)} μm"
-    font = _load_label_font(size=font_size_px)
+    font, is_truetype = _load_label_font(size=font_size_px)
+    # Use U+00B5 MICRO SIGN (Latin-1) rather than U+03BC GREEK SMALL LETTER
+    # MU. Both look identical when both are present, but only U+00B5 is
+    # guaranteed in every Latin-coverage font; some stripped-down system
+    # fonts omit the Greek block, which is what the live deploy was hitting.
+    unit = "µm" if is_truetype else "um"
+    label_txt = f"{int(scale_um)} {unit}"
 
     bbox = draw_final.textbbox((0, 0), label_txt, font=font)
     text_w = bbox[2] - bbox[0]
