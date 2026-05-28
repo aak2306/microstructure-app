@@ -96,11 +96,19 @@ def draw_cracked_flake(
     draw.polygon(poly, fill=255)
 
 
-def paste_blob(pil_img: Image.Image, cx: int, cy: int, r_px: int) -> bool:
+def paste_blob(
+    pil_img: Image.Image,
+    cx: int,
+    cy: int,
+    r_px: int,
+    periodic: bool = False,
+) -> bool:
     """Generate an irregular blob and composite it into ``pil_img``.
 
-    Returns False if the blob falls outside the image bounds, in which case
-    ``pil_img`` is left unchanged.
+    Returns False if the blob falls outside the image bounds (only when
+    ``periodic`` is False); otherwise pastes and lets PIL clip any portion
+    that runs past the canvas edge. Under periodic boundaries the wrapped
+    halves are pasted separately by the caller.
     """
 
     def ccw_sort(p: np.ndarray) -> np.ndarray:
@@ -142,12 +150,15 @@ def paste_blob(pil_img: Image.Image, cx: int, cy: int, r_px: int) -> bool:
     height_px, width_px = pil_img.height, pil_img.width
     top = cy - bh // 2
     left = cx - bw // 2
-    if top < 0 or left < 0 or top + bh > height_px or left + bw > width_px:
+    if not periodic and (
+        top < 0 or left < 0 or top + bh > height_px or left + bw > width_px
+    ):
         return False
 
     # Composite via PIL's masked paste — for a binary (0/255) blob, using
     # the blob itself as the mask is equivalent to np.maximum on a 0/255
     # canvas but avoids copying the entire canvas to numpy and back per
-    # particle.
+    # particle. PIL clips out-of-range paste positions, which is exactly
+    # what we want when called from a PBC-aware caller.
     pil_img.paste(blob_img, (left, top), mask=blob_img)
     return True

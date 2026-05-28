@@ -102,6 +102,27 @@ def test_progress_callback_invoked_each_point():
     assert seen[-1] == 1.0
 
 
+def test_pbc_validation_error_lower_than_non_pbc():
+    """With PBC, achieved φ ≈ target φ across the whole sweep, so the
+    L_A measured/theory ratio reflects only the perimeter estimator's
+    bias rather than depleted-edge bias. Worst-case |error| should
+    therefore be lower than the non-PBC run at the same params."""
+    common = dict(
+        canvas_um=300.0,
+        diameter_um=10.0,
+        pixel_per_um=10,
+        phi_targets=[0.05, 0.10, 0.15, 0.20],
+        seed=0,
+    )
+    no_pbc = validate_monodisperse_circles(**common, periodic_boundaries=False)
+    pbc = validate_monodisperse_circles(**common, periodic_boundaries=True)
+
+    worst_no_pbc = max(abs(p.relative_error_pct) for p in no_pbc)
+    worst_pbc = max(abs(p.relative_error_pct) for p in pbc)
+
+    assert worst_pbc < worst_no_pbc
+
+
 def test_relative_error_zero_when_theory_zero():
     p = ValidationPoint(
         phi_target=0.0,
