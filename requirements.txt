@@ -1,5 +1,6 @@
 streamlit
 numpy
+pandas
 scipy
 scikit-image
 Pillow
