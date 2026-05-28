@@ -4,7 +4,7 @@ import numpy as np
 from PIL import Image
 
 from microstructure import generators as gen
-from microstructure.placement import place_particles
+from microstructure.placement import PlacedParticle, place_particles
 
 
 def _blank(w: int = 400, h: int = 400) -> Image.Image:
@@ -77,9 +77,31 @@ def test_placement_centers_within_canvas_margin():
         mix_ratio=None,
         volume_fraction=10.0,
     )
-    for cx, cy in centers:
-        assert avg_rad_px <= cx < img.width - avg_rad_px
-        assert avg_rad_px <= cy < img.height - avg_rad_px
+    for p in centers:
+        assert avg_rad_px <= p.cx < img.width - avg_rad_px
+        assert avg_rad_px <= p.cy < img.height - avg_rad_px
+        assert p.r_px > 0
+
+
+def test_placement_returns_placed_particle_namedtuples():
+    img = _blank()
+    np.random.seed(0)
+    particles = place_particles(
+        pil_img=img,
+        shape=gen.CIRCULAR,
+        num_particles=5,
+        avg_rad_px=12,
+        size_variation=10.0,
+        allow_overlap=False,
+        bumpiness_pct=10.0,
+        jitter_pct=15.0,
+        mix_ratio=None,
+        volume_fraction=10.0,
+    )
+    assert len(particles) > 0
+    for p in particles:
+        assert isinstance(p, PlacedParticle)
+        assert hasattr(p, "cx") and hasattr(p, "cy") and hasattr(p, "r_px")
 
 
 def test_progress_callback_invoked_at_completion():

@@ -5,9 +5,12 @@ this module only wires inputs from the UI to those functions and displays
 the results.
 """
 
-from io import BytesIO
+import csv
+from datetime import datetime
+from io import BytesIO, StringIO
 
 import numpy as np
+import pandas as pd
 import streamlit as st
 from PIL import Image
 
@@ -22,11 +25,24 @@ from microstructure.rendering import add_scale_bar
 
 st.set_page_config(page_title="Microstructure Generator", layout="centered")
 st.title("Microstructure Interface Area Calculator")
+st.caption(
+    "Simulate 2D microstructures and measure the interfacial length per unit "
+    "area — useful for relating microstructure to bulk properties (diffusion, "
+    "strength, conductivity)."
+)
 
-# --- UI ---
+# ---------------------------------------------------------------------------
+# Inputs
+# ---------------------------------------------------------------------------
 col1, col2 = st.columns(2)
 with col1:
-    image_width_um = st.number_input("Image Width (µm)", 50.0, 1000.0, 200.0)
+    image_width_um = st.number_input(
+        "Image Width (µm)",
+        50.0,
+        1000.0,
+        200.0,
+        help="Physical width of the simulated region in microns.",
+    )
     particle_diameter_um = st.number_input(
         "Avg. Particle Diameter (µm)",
         min_value=0.1,
@@ -34,22 +50,27 @@ with col1:
         value=10.0,
         step=0.1,
         format="%.1f",
+        help="Nominal particle diameter. Actual sizes vary by ± the size "
+        "variation set below.",
     )
     pixel_per_um = st.slider(
-        "Pixels per Micron", min_value=1, max_value=100, value=10, step=1
-    )
-    size_variation = st.number_input(
-        "Size variation ± (%)", min_value=0.0, max_value=100.0, value=5.0, step=0.1
-    )
-    rng_seed = st.number_input(
-        "Random Seed (-1 = random each run)",
-        min_value=-1,
-        max_value=9999,
-        value=-1,
+        "Pixels per Micron",
+        min_value=1,
+        max_value=100,
+        value=10,
         step=1,
+        help="Spatial resolution. Higher values make perimeter measurements "
+        "more accurate but the canvas grows quadratically — expect slow "
+        "generation above ~20 px/µm for large images.",
     )
 with col2:
-    image_height_um = st.number_input("Image Height (µm)", 50.0, 1000.0, 200.0)
+    image_height_um = st.number_input(
+        "Image Height (µm)",
+        50.0,
+        1000.0,
+        200.0,
+        help="Physical height of the simulated region in microns.",
+    )
     volume_fraction = st.number_input(
         "Volume Fraction (%)",
         min_value=0.1,
@@ -57,33 +78,94 @@ with col2:
         value=20.0,
         step=0.1,
         format="%.1f",
+        help="Target fraction of the image area occupied by particles. The "
+        "*achieved* fraction is reported with results and may differ when "
+        "overlap is disallowed at high target values.",
     )
-    shape = st.selectbox("Particle Shape", gen.SHAPES)
-
-if shape == gen.ROUGH_SPHERES:
-    bumpiness_pct = st.slider(
-        "Bumpiness ± (%)", min_value=0.0, max_value=30.0, value=10.0, step=1.0
+    shape = st.selectbox(
+        "Particle Shape",
+        gen.SHAPES,
+        help="Particle geometry. Non-circular shapes use different drawing "
+        "logic and may produce different interfacial-length numbers for the "
+        "same nominal diameter.",
     )
-else:
-    bumpiness_pct = 10.0
 
-if shape == gen.CRACKED_FLAKES:
-    jitter_pct = st.slider(
-        "Edge jitter ± (%)", min_value=0.0, max_value=30.0, value=15.0, step=1.0
+with st.expander("Advanced settings"):
+    size_variation = st.number_input(
+        "Size variation ± (%)",
+        min_value=0.0,
+        max_value=100.0,
+        value=5.0,
+        step=0.1,
+        help="Half-width of the uniform distribution around the nominal "
+        "diameter (e.g., 10% means radii in 0.9× to 1.1× of nominal).",
     )
-else:
-    jitter_pct = 15.0
+    rng_seed = st.number_input(
+        "Random Seed",
+        min_value=-1,
+        max_value=9999,
+        value=-1,
+        step=1,
+        help="-1 means a different random arrangement each run. Set to any "
+        "non-negative integer to make the result reproducible.",
+    )
+    allow_overlap = st.checkbox(
+        "Allow particle overlap",
+        value=False,
+        help="When off, the generator rejects placements within 1.8× the "
+        "average radius of an existing particle. Required for very high "
+        "volume fractions (≳ 70%).",
+    )
+    if shape == gen.ROUGH_SPHERES:
+        bumpiness_pct = st.slider(
+            "Bumpiness ± (%)",
+            min_value=0.0,
+            max_value=30.0,
+            value=10.0,
+            step=1.0,
+            help="Standard deviation of the radial perturbation, as a "
+            "fraction of radius.",
+        )
+    else:
+        bumpiness_pct = 10.0
+    if shape == gen.CRACKED_FLAKES:
+        jitter_pct = st.slider(
+            "Edge jitter ± (%)",
+            min_value=0.0,
+            max_value=30.0,
+            value=15.0,
+            step=1.0,
+            help="Per-vertex displacement, as a fraction of diameter. Higher "
+            "values produce more angular, fractured-looking edges.",
+        )
+    else:
+        jitter_pct = 15.0
+    mix_ratio = (
+        st.slider(
+            "% Circular in Mix",
+            0,
+            100,
+            33,
+            help="In Mixed mode, the percentage of particles drawn as "
+            "circles. The remainder is split evenly between elliptical and "
+            "irregular blobs.",
+        )
+        if shape == gen.MIXED
+        else None
+    )
 
-allow_overlap = st.checkbox("Allow particle overlap", value=False)
-
-mix_ratio = (
-    st.slider("% Circular in Mix", 0, 100, 33) if shape == gen.MIXED else None
-)
-
-calculate = st.button("Calculate")
+calculate = st.button("Calculate", type="primary")
 if not calculate:
+    st.info(
+        "Set your parameters above and click **Calculate** to generate a "
+        "microstructure. Increase **Pixels per Micron** for sharper edges; "
+        "increase the **Image** dimensions for better statistics."
+    )
     st.stop()
 
+# ---------------------------------------------------------------------------
+# Compute
+# ---------------------------------------------------------------------------
 if rng_seed >= 0:
     np.random.seed(int(rng_seed))
 
@@ -101,7 +183,7 @@ avg_rad_px = max(1, int(rad_um * pixel_per_um))
 pil_img = Image.fromarray(canvas)
 
 progress = st.progress(0.0)
-centers = place_particles(
+particles = place_particles(
     pil_img=pil_img,
     shape=shape,
     num_particles=num_particles,
@@ -123,39 +205,105 @@ interface_um = interfacial_length_um(binary, pixel_per_um)
 ratio = interface_to_area_ratio_per_um(interface_um, image_width_um, image_height_um)
 achieved_vf_pct = measured_volume_fraction(binary) * 100.0
 
+# ---------------------------------------------------------------------------
+# Results
+# ---------------------------------------------------------------------------
 st.markdown("---")
 st.subheader("Results")
 
-if len(centers) < num_particles:
+if len(particles) < num_particles:
     st.warning(
-        f"Placed only {len(centers)} of {num_particles} requested particles — "
-        "the non-overlap budget was exhausted. Try enabling **Allow particle "
+        f"Placed only {len(particles)} of {num_particles} requested particles "
+        "— the non-overlap budget was exhausted. Try enabling **Allow particle "
         "overlap**, lowering **Volume Fraction**, or increasing **Image** size."
     )
 
 col_a, col_b = st.columns(2)
-col_a.metric("Particles Placed", f"{len(centers)}")
-col_a.metric("Interfacial Length", f"{interface_um:.2f} µm")
+col_a.metric("Particles Placed", f"{len(particles)}")
+col_a.metric(
+    "Interfacial Length",
+    f"{interface_um:.2f} µm",
+    help="Total perimeter of all connected components, in microns, "
+    "measured by the Crofton formula on the rasterized image.",
+)
 col_b.metric(
     "Volume Fraction (achieved)",
     f"{achieved_vf_pct:.2f}%",
     delta=f"{achieved_vf_pct - volume_fraction:+.2f}% vs target",
     delta_color="off",
+    help="Fraction of image pixels occupied by particles. Under standard "
+    "stereological assumptions this equals the 3D volume fraction.",
 )
-col_b.metric("Interface / Area", f"{ratio:.5f} µm⁻¹")
+col_b.metric(
+    "Interface / Area",
+    f"{ratio:.5f} µm⁻¹",
+    help="Interfacial length divided by image area. A direct, "
+    "resolution-independent measure of how finely the microstructure is "
+    "subdivided.",
+)
 
 st.image(
     np.array(final),
     caption="Simulated Microstructure",
     channels="GRAY",
-    use_container_width=True,
+    width="stretch",
 )
 
-buf = BytesIO()
-final.save(buf, format="PNG")
-st.download_button(
+# Particle-size histogram
+if particles:
+    sizes_um = np.array([2 * p.r_px / pixel_per_um for p in particles])
+    with st.expander("Particle size distribution"):
+        bins = max(5, min(40, int(np.sqrt(len(sizes_um)))))
+        counts, edges = np.histogram(sizes_um, bins=bins)
+        centers_um = 0.5 * (edges[:-1] + edges[1:])
+        hist_df = pd.DataFrame({"count": counts}, index=np.round(centers_um, 2))
+        hist_df.index.name = "diameter (µm)"
+        st.bar_chart(hist_df, height=240)
+        st.caption(
+            f"n = {len(sizes_um)} particles | "
+            f"mean = {sizes_um.mean():.2f} µm | "
+            f"std = {sizes_um.std():.2f} µm | "
+            f"nominal = {particle_diameter_um:.2f} µm"
+        )
+
+# ---------------------------------------------------------------------------
+# Downloads
+# ---------------------------------------------------------------------------
+png_buf = BytesIO()
+final.save(png_buf, format="PNG")
+
+csv_buf = StringIO()
+writer = csv.writer(csv_buf)
+writer.writerow(["field", "value"])
+writer.writerow(["timestamp", datetime.utcnow().isoformat(timespec="seconds") + "Z"])
+writer.writerow(["image_width_um", image_width_um])
+writer.writerow(["image_height_um", image_height_um])
+writer.writerow(["pixel_per_um", pixel_per_um])
+writer.writerow(["particle_diameter_um", particle_diameter_um])
+writer.writerow(["shape", shape])
+writer.writerow(["volume_fraction_target_pct", volume_fraction])
+writer.writerow(["size_variation_pct", size_variation])
+writer.writerow(["allow_overlap", allow_overlap])
+writer.writerow(["rng_seed", rng_seed])
+writer.writerow(["mix_ratio_pct", mix_ratio if mix_ratio is not None else ""])
+writer.writerow(["bumpiness_pct", bumpiness_pct])
+writer.writerow(["jitter_pct", jitter_pct])
+writer.writerow(["particles_requested", num_particles])
+writer.writerow(["particles_placed", len(particles)])
+writer.writerow(["volume_fraction_achieved_pct", round(achieved_vf_pct, 4)])
+writer.writerow(["interfacial_length_um", round(interface_um, 4)])
+writer.writerow(["interface_area_ratio_per_um", round(ratio, 6)])
+
+dl_col1, dl_col2 = st.columns(2)
+dl_col1.download_button(
     "Download PNG",
-    data=buf.getvalue(),
+    data=png_buf.getvalue(),
     file_name="microstructure.png",
     mime="image/png",
+)
+dl_col2.download_button(
+    "Download metrics (CSV)",
+    data=csv_buf.getvalue(),
+    file_name="microstructure_metrics.csv",
+    mime="text/csv",
 )
