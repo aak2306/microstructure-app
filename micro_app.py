@@ -15,6 +15,7 @@ from microstructure import generators as gen
 from microstructure.metrics import (
     interface_to_area_ratio_per_um,
     interfacial_length_um,
+    measured_volume_fraction,
 )
 from microstructure.placement import place_particles
 from microstructure.rendering import add_scale_bar
@@ -40,7 +41,13 @@ with col1:
     size_variation = st.number_input(
         "Size variation ± (%)", min_value=0.0, max_value=100.0, value=5.0, step=0.1
     )
-    rng_seed = st.number_input("Random Seed (0=random)", 0, 9999, 0)
+    rng_seed = st.number_input(
+        "Random Seed (-1 = random each run)",
+        min_value=-1,
+        max_value=9999,
+        value=-1,
+        step=1,
+    )
 with col2:
     image_height_um = st.number_input("Image Height (µm)", 50.0, 1000.0, 200.0)
     volume_fraction = st.number_input(
@@ -77,7 +84,7 @@ calculate = st.button("Calculate")
 if not calculate:
     st.stop()
 
-if rng_seed:
+if rng_seed >= 0:
     np.random.seed(int(rng_seed))
 
 width_px = int(image_width_um * pixel_per_um)
@@ -85,7 +92,8 @@ height_px = int(image_height_um * pixel_per_um)
 canvas = np.zeros((height_px, width_px), dtype=np.uint8)
 
 rad_um = particle_diameter_um / 2
-shape_area_um2 = np.pi * rad_um**2
+area_factor = gen.expected_area_factor(shape, mix_ratio)
+shape_area_um2 = np.pi * rad_um**2 * area_factor
 area_target_um2 = image_width_um * image_height_um * volume_fraction / 100
 num_particles = max(1, int(area_target_um2 / shape_area_um2))
 
@@ -113,14 +121,28 @@ final = add_scale_bar(pil_img, image_width_um, image_height_um, pixel_per_um)
 binary = canvas > 0
 interface_um = interfacial_length_um(binary, pixel_per_um)
 ratio = interface_to_area_ratio_per_um(interface_um, image_width_um, image_height_um)
+achieved_vf_pct = measured_volume_fraction(binary) * 100.0
 
 st.markdown("---")
 st.subheader("Results")
-st.write(
-    f"**Particles Placed:** {len(centers)} | "
-    f"**Interfacial Length:** {interface_um:.2f} µm | "
-    f"**Interface/Area:** {ratio:.5f} µm⁻¹"
+
+if len(centers) < num_particles:
+    st.warning(
+        f"Placed only {len(centers)} of {num_particles} requested particles — "
+        "the non-overlap budget was exhausted. Try enabling **Allow particle "
+        "overlap**, lowering **Volume Fraction**, or increasing **Image** size."
+    )
+
+col_a, col_b = st.columns(2)
+col_a.metric("Particles Placed", f"{len(centers)}")
+col_a.metric("Interfacial Length", f"{interface_um:.2f} µm")
+col_b.metric(
+    "Volume Fraction (achieved)",
+    f"{achieved_vf_pct:.2f}%",
+    delta=f"{achieved_vf_pct - volume_fraction:+.2f}% vs target",
+    delta_color="off",
 )
+col_b.metric("Interface / Area", f"{ratio:.5f} µm⁻¹")
 
 st.image(
     np.array(final),

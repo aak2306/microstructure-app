@@ -71,3 +71,36 @@ def test_draw_cracked_flake_deterministic_with_seed():
 def test_all_shape_names_are_unique_strings(shape):
     assert isinstance(shape, str)
     assert gen.SHAPES.count(shape) == 1
+
+
+def test_expected_area_factor_circle_is_one():
+    assert gen.expected_area_factor(gen.CIRCULAR) == 1.0
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [gen.ELLIPTICAL, gen.IRREGULAR, gen.CRACKED_FLAKES],
+)
+def test_expected_area_factor_non_circular_is_less_than_one(shape):
+    assert 0 < gen.expected_area_factor(shape) < 1.0
+
+
+def test_expected_area_factor_mixed_interpolates():
+    # 100% circles → 1.0 (same as pure circular)
+    assert gen.expected_area_factor(gen.MIXED, mix_ratio=100) == 1.0
+    # 0% circles → mean of elliptical + irregular factors
+    expected = (0.85 + 0.70) / 2.0
+    assert gen.expected_area_factor(gen.MIXED, mix_ratio=0) == pytest.approx(expected)
+
+
+def test_paste_blob_is_idempotent_after_optimization():
+    """The optimized paste should still leave the image with foreground
+    pixels inside the bounding region."""
+    img = _blank(400, 400)
+    np.random.seed(2)
+    assert gen.paste_blob(img, cx=200, cy=200, r_px=30) is True
+    arr = np.array(img)
+    # blob should be entirely within the image (no wraparound)
+    assert int((arr > 0).sum()) > 0
+    assert arr[0, :].sum() == 0  # top row untouched
+    assert arr[-1, :].sum() == 0  # bottom row untouched

@@ -8,6 +8,7 @@ from PIL import Image, ImageDraw
 from microstructure.metrics import (
     interface_to_area_ratio_per_um,
     interfacial_length_um,
+    measured_volume_fraction,
 )
 
 
@@ -74,3 +75,17 @@ def test_ratio_units_and_division():
     interface_um = 100.0
     w, h = 50.0, 20.0
     assert interface_to_area_ratio_per_um(interface_um, w, h) == 100.0 / (50.0 * 20.0)
+
+
+def test_measured_volume_fraction_empty():
+    assert measured_volume_fraction(np.zeros((50, 50), dtype=bool)) == 0.0
+
+
+def test_measured_volume_fraction_full():
+    assert measured_volume_fraction(np.ones((50, 50), dtype=bool)) == 1.0
+
+
+def test_measured_volume_fraction_quarter():
+    binary = np.zeros((100, 100), dtype=bool)
+    binary[:50, :50] = True
+    assert measured_volume_fraction(binary) == 0.25
