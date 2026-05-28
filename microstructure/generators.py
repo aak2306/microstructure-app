@@ -22,6 +22,36 @@ MIXED = "Mixed (Circular + Elliptical + Irregular)"
 
 SHAPES = [CIRCULAR, ELLIPTICAL, IRREGULAR, ROUGH_SPHERES, CRACKED_FLAKES, MIXED]
 
+# Expected drawn-area expressed as a multiple of π·r² for the nominal radius.
+# Used to estimate how many particles to place to hit a target volume fraction.
+# Circles and rough spheres average to π·r²; the others draw smaller shapes
+# inside that bounding circle, so the factor is less than 1.
+# These are open-loop estimates — actual achieved VF is reported separately.
+_EXPECTED_AREA_FACTORS = {
+    CIRCULAR: 1.00,
+    ELLIPTICAL: 0.85,     # E[ry] over Uniform(0.5, 1.2) * r
+    IRREGULAR: 0.70,      # bezier blob averages ~70% of its 2r × 2r bbox
+    ROUGH_SPHERES: 1.00,  # symmetric noise → mean radius = r
+    CRACKED_FLAKES: 0.70,
+}
+
+
+def expected_area_factor(shape: str, mix_ratio: int | None = None) -> float:
+    """Return the expected drawn area as a multiple of π·r² for ``shape``.
+
+    For MIXED, ``mix_ratio`` is the % of circles; the remainder is split
+    evenly between elliptical and irregular.
+    """
+    if shape != MIXED:
+        return _EXPECTED_AREA_FACTORS[shape]
+    m = (mix_ratio or 0) / 100.0
+    rest = (1.0 - m) / 2.0
+    return (
+        m * _EXPECTED_AREA_FACTORS[CIRCULAR]
+        + rest * _EXPECTED_AREA_FACTORS[ELLIPTICAL]
+        + rest * _EXPECTED_AREA_FACTORS[IRREGULAR]
+    )
+
 
 def draw_circle(draw: ImageDraw.ImageDraw, cx: int, cy: int, r_px: int) -> None:
     draw.ellipse([cx - r_px, cy - r_px, cx + r_px, cy + r_px], fill=255)
@@ -107,8 +137,7 @@ def paste_blob(pil_img: Image.Image, cx: int, cy: int, r_px: int) -> bool:
     draw_blob = ImageDraw.Draw(blob_img)
     draw_blob.polygon(list(zip(x, y)), fill=255)
     blob_img = blob_img.rotate(np.random.rand() * 360, expand=True, fillcolor=0)
-    blob_arr = np.array(blob_img)
-    bh, bw = blob_arr.shape
+    bw, bh = blob_img.size
 
     height_px, width_px = pil_img.height, pil_img.width
     top = cy - bh // 2
@@ -116,8 +145,9 @@ def paste_blob(pil_img: Image.Image, cx: int, cy: int, r_px: int) -> bool:
     if top < 0 or left < 0 or top + bh > height_px or left + bw > width_px:
         return False
 
-    temp = np.array(pil_img)
-    region = temp[top : top + bh, left : left + bw]
-    temp[top : top + bh, left : left + bw] = np.maximum(region, blob_arr)
-    pil_img.paste(Image.fromarray(temp))
+    # Composite via PIL's masked paste — for a binary (0/255) blob, using
+    # the blob itself as the mask is equivalent to np.maximum on a 0/255
+    # canvas but avoids copying the entire canvas to numpy and back per
+    # particle.
+    pil_img.paste(blob_img, (left, top), mask=blob_img)
     return True
