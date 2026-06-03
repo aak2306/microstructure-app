@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from PIL import Image, ImageDraw, ImageFont
 
-# Candidate TrueType paths to try in order. Streamlit Cloud (Debian) ships
-# DejaVu by name; Linux distros usually have the full path; macOS keeps it
-# under /System; the bare name works wherever Pillow has it on its font
-# search path.
+# Candidate TrueType paths to try in order.
+# packages.txt installs fonts-dejavu-core on Streamlit Cloud so the
+# absolute Debian path is reliable there; the bare name works wherever
+# Pillow has the font on its search path; macOS paths are tried last.
 _FONT_CANDIDATES = (
-    "DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Debian / Streamlit Cloud
+    "DejaVuSans.ttf",                                    # Pillow font search path
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",      # macOS
     "/Library/Fonts/Arial.ttf",
     "Arial.ttf",
 )
@@ -20,20 +22,40 @@ _FONT_CANDIDATES = (
 def _load_label_font(size: int = 18) -> tuple[ImageFont.ImageFont, bool]:
     """Try real TrueType fonts first, then a size-aware default.
 
-    Returns ``(font, is_truetype)``. The flag tells the caller whether
-    non-ASCII glyphs (specifically µ) are safe to use — older Pillow's
-    legacy bitmap default font is ASCII-only and would render µ as a
-    missing-glyph box.
+    Returns ``(font, can_use_micro)`` where the flag is True only when
+    the loaded font can actually render the µ glyph (U+00B5). Older
+    Pillow bitmap fonts and stripped-down TrueType fonts silently
+    substitute a box; we detect this and fall back to ASCII "um".
     """
     for path in _FONT_CANDIDATES:
         try:
-            return ImageFont.truetype(path, size), True
+            font = ImageFont.truetype(path, size)
+            if _glyph_renders(font, "µ"):
+                return font, True
         except OSError:
             continue
     try:
-        return ImageFont.load_default(size=size), True  # Pillow ≥ 10
+        font = ImageFont.load_default(size=size)  # Pillow ≥ 10
+        return font, _glyph_renders(font, "µ")
     except TypeError:
         return ImageFont.load_default(), False
+
+
+def _glyph_renders(font: ImageFont.ImageFont, char: str) -> bool:
+    """Return True if *char* draws as a visible, non-.notdef glyph.
+
+    Renders *char* into a small scratch image and checks that at least
+    one pixel was darkened. A missing glyph either produces zero pixels
+    (no outline) or a hollow .notdef box whose interior stays white;
+    either way the minimum pixel value stays near 255.
+    """
+    try:
+        canvas_side = 64
+        tmp = Image.new("L", (canvas_side, canvas_side), 255)
+        ImageDraw.Draw(tmp).text((4, 4), char, font=font, fill=0)
+        return min(tmp.getdata()) < 200  # at least one dark pixel drawn
+    except Exception:
+        return False
 
 
 def add_scale_bar(
