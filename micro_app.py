@@ -316,11 +316,7 @@ else:
     )
 
     st.markdown("##### 3D estimate from the 2D section")
-    st.caption(
-        "Assumes the image is an isotropic uniform random (IUR) section "
-        "through a 3D structure (Underwood, 1970). If the image *is* the "
-        "structure, treat this as a 2D analogue only."
-    )
+    st.caption("Underwood, 1970")
     st.metric(
         "Specific Surface Area (S_V)",
         f"{s_v_per_um:.5f} µm⁻¹",
