@@ -308,19 +308,19 @@ else:
         "fraction.",
     )
     col_b.metric(
-        "Interface / Area (L_A)",
+        "Interface / Area (L/A)",
         f"{ratio:.5f} µm⁻¹",
         help="Interfacial length divided by image area. A direct, "
         "resolution-independent measure of how finely the microstructure "
-        "is subdivided. Standard symbol in stereology: L_A.",
+        "is subdivided. Standard symbol in stereology: L/A.",
     )
 
     st.markdown("##### 3D estimate from the 2D section")
     st.caption("Underwood, 1970")
     st.metric(
-        "Specific Surface Area (S_V)",
+        "Specific Surface Area (S/V)",
         f"{s_v_per_um:.5f} µm⁻¹",
-        help="S_V = (4/π) · L_A. Surface area per unit volume in 3D. "
+        help="S/V = (4/π) · L/A. Surface area per unit volume in 3D. "
         "Drives sintering kinetics, gas-solid reaction rates, and "
         "catalyst activity.",
     )
@@ -382,8 +382,8 @@ else:
     writer.writerow(["particles_placed", len(particles)])
     writer.writerow(["volume_fraction_achieved_pct", round(achieved_vf_pct, 4)])
     writer.writerow(["interfacial_length_um", round(interface_um, 4)])
-    writer.writerow(["interface_area_ratio_per_um_L_A", round(ratio, 6)])
-    writer.writerow(["specific_surface_area_per_um_S_V", round(s_v_per_um, 6)])
+    writer.writerow(["interface_area_ratio_per_um_LA", round(ratio, 6)])
+    writer.writerow(["specific_surface_area_per_um_SV", round(s_v_per_um, 6)])
 
     dl_col1, dl_col2 = st.columns(2)
     dl_col1.download_button(
