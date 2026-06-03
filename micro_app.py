@@ -25,6 +25,38 @@ from microstructure.metrics import (
 from microstructure.placement import place_particles
 from microstructure.rendering import add_scale_bar
 
+# ---------------------------------------------------------------------------
+# Colour palettes  (particle colour, matrix/background colour)
+# ---------------------------------------------------------------------------
+_PALETTES: dict[str, tuple[str, str] | None] = {
+    "Classic (white / black)":  ("#FFFFFF", "#000000"),
+    "Inverted (black / white)": ("#1A1A1A", "#F0F0F0"),
+    "Steel (silver / navy)":    ("#B8C8D8", "#1C2B3A"),
+    "Gold (gold / charcoal)":   ("#E8B84B", "#1A1A1A"),
+    "Copper (copper / dark)":   ("#C87941", "#2A2A2A"),
+    "Teal (mint / forest)":     ("#4DD9AC", "#0D2B1F"),
+    "Custom":                   None,
+}
+
+
+def _hex_to_rgb(h: str) -> tuple[int, int, int]:
+    h = h.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _colorize(
+    canvas: np.ndarray, particle_hex: str, matrix_hex: str
+) -> np.ndarray:
+    """Map a 0/255 grayscale canvas to an RGB array using two hex colours."""
+    p = _hex_to_rgb(particle_hex)
+    m = _hex_to_rgb(matrix_hex)
+    rgb = np.empty((*canvas.shape, 3), dtype=np.uint8)
+    mask = canvas > 0
+    rgb[mask] = p
+    rgb[~mask] = m
+    return rgb
+
+
 st.set_page_config(page_title="Microstructure Generator", layout="centered")
 st.title("Microstructure Interface Area Calculator")
 st.caption(
@@ -207,6 +239,23 @@ with st.expander("Advanced settings"):
         else None
     )
 
+with st.expander("Appearance"):
+    palette_name = st.selectbox(
+        "Colour palette",
+        list(_PALETTES.keys()),
+        help="Preset particle / matrix colour combinations. Choose "
+        "**Custom** to pick your own colours with the colour pickers.",
+    )
+    if _PALETTES[palette_name] is None:  # Custom
+        ap_col1, ap_col2 = st.columns(2)
+        particle_color = ap_col1.color_picker("Particle colour", "#FFFFFF")
+        matrix_color   = ap_col2.color_picker("Matrix colour",   "#000000")
+    else:
+        particle_color, matrix_color = _PALETTES[palette_name]
+        ap_col1, ap_col2 = st.columns(2)
+        ap_col1.color_picker("Particle colour", particle_color, disabled=True)
+        ap_col2.color_picker("Matrix colour",   matrix_color,   disabled=True)
+
 calculate = st.button("Calculate", type="primary", key="calculate_gen")
 if not calculate:
     st.info(
@@ -265,10 +314,6 @@ else:
     )
 
     canvas = np.array(pil_img)
-    final = add_scale_bar(
-        pil_img, image_width_um, image_height_um, pixel_per_um
-    )
-
     binary = canvas > 0
     interface_um = interfacial_length_um(binary, pixel_per_um)
     ratio = interface_to_area_ratio_per_um(
@@ -278,6 +323,10 @@ else:
     achieved_vf_pct = achieved_vf * 100.0
 
     s_v_per_um = specific_surface_area_per_um(ratio)
+
+    # Colorize the binary canvas with the chosen palette and add scale bar.
+    pil_rgb = Image.fromarray(_colorize(canvas, particle_color, matrix_color))
+    final = add_scale_bar(pil_rgb, image_width_um, image_height_um, pixel_per_um)
 
     st.markdown("---")
     st.subheader("Results")
@@ -328,7 +377,6 @@ else:
     st.image(
         np.array(final),
         caption="Simulated Microstructure",
-        channels="GRAY",
         width="stretch",
     )
 
@@ -384,6 +432,8 @@ else:
     writer.writerow(["interfacial_length_um", round(interface_um, 4)])
     writer.writerow(["interface_area_ratio_per_um_LA", round(ratio, 6)])
     writer.writerow(["specific_surface_area_per_um_SV", round(s_v_per_um, 6)])
+    writer.writerow(["particle_colour", particle_color])
+    writer.writerow(["matrix_colour", matrix_color])
 
     dl_col1, dl_col2 = st.columns(2)
     dl_col1.download_button(

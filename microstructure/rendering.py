@@ -85,29 +85,31 @@ def add_scale_bar(
     scale_um = image_width_um / 5
     scale_px = int(scale_um * pixel_per_um)
 
-    final = Image.new("L", (width_px, height_px + box_h), color=255)
+    # Scale-bar strip: always white background, black bar + text so the
+    # annotation stays legible regardless of the image's colour scheme.
+    mode = pil_img.mode  # "L" (grayscale) or "RGB" (colour)
+    strip_bg: int | tuple[int, int, int] = 255 if mode == "L" else (255, 255, 255)
+    ink:      int | tuple[int, int, int] = 0   if mode == "L" else (0, 0, 0)
+
+    final = Image.new(mode, (width_px, height_px + box_h), color=strip_bg)
     final.paste(pil_img, (0, 0))
 
     draw_final = ImageDraw.Draw(final)
     bar_y = height_px + padding
     bar_x1 = (width_px - scale_px) // 2
     draw_final.rectangle(
-        [bar_x1, bar_y, bar_x1 + scale_px, bar_y + bar_h], fill=0
+        [bar_x1, bar_y, bar_x1 + scale_px, bar_y + bar_h], fill=ink
     )
 
-    font, is_truetype = _load_label_font(size=font_size_px)
-    # Use U+00B5 MICRO SIGN (Latin-1) rather than U+03BC GREEK SMALL LETTER
-    # MU. Both look identical when both are present, but only U+00B5 is
-    # guaranteed in every Latin-coverage font; some stripped-down system
-    # fonts omit the Greek block, which is what the live deploy was hitting.
-    unit = "µm" if is_truetype else "um"
+    font, can_use_micro = _load_label_font(size=font_size_px)
+    unit = "µm" if can_use_micro else "um"
     label_txt = f"{int(scale_um)} {unit}"
 
     bbox = draw_final.textbbox((0, 0), label_txt, font=font)
     text_w = bbox[2] - bbox[0]
     text_x = (width_px - text_w) // 2
     draw_final.text(
-        (text_x, bar_y + bar_h + padding), label_txt, font=font, fill=0
+        (text_x, bar_y + bar_h + padding), label_txt, font=font, fill=ink
     )
 
     return final
