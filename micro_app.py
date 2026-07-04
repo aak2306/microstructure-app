@@ -101,6 +101,26 @@ def _apply_suggestion() -> None:
         st.session_state["bumpiness_pct"] = float(
             np.clip(round(s.bumpiness_pct), 0.0, 30.0)
         )
+    # Match the simulation's field of view and resolution to the upload —
+    # without this, L/A and S/V are measured on a different canvas and
+    # can't be compared against the micrograph's values.
+    ppum = analysis.get("ppum")
+    if ppum:
+        st.session_state["image_width_um"] = float(
+            np.clip(round(analysis["img_w_px"] / ppum, 1), 50.0, 1000.0)
+        )
+        st.session_state["image_height_um"] = float(
+            np.clip(round(analysis["img_h_px"] / ppum, 1), 50.0, 1000.0)
+        )
+        st.session_state["pixel_per_um"] = int(np.clip(round(ppum), 1, 100))
+    # Dense structures undershoot their target VF badly when the
+    # non-overlap spacing rule is on; real particles touch anyway.
+    if s.volume_fraction_pct > 15.0:
+        st.session_state["allow_overlap"] = True
+    # The micrograph is a window into a larger structure, so the matching
+    # simulation should be toroidal — this also removes the edge-depletion
+    # bias that makes achieved VF undershoot the target.
+    st.session_state["periodic_boundaries"] = True
     st.session_state["suggestion_applied"] = True
 
 
@@ -127,6 +147,11 @@ _GEN_WIDGET_DEFAULTS: dict[str, object] = {
     "size_variation": 5.0,
     "lognormal_sigma_g": 1.5,
     "bumpiness_pct": 10.0,
+    "image_width_um": 200.0,
+    "image_height_um": 200.0,
+    "pixel_per_um": 10,
+    "allow_overlap": False,
+    "periodic_boundaries": False,
 }
 for _key, _default in _GEN_WIDGET_DEFAULTS.items():
     st.session_state.setdefault(_key, _default)
@@ -144,7 +169,7 @@ with tab_gen:
             "Image Width (µm)",
             50.0,
             1000.0,
-            200.0,
+            key="image_width_um",
             help="Physical width of the simulated region in microns.",
         )
         particle_diameter_um = st.number_input(
@@ -161,8 +186,8 @@ with tab_gen:
             "Pixels per Micron",
             min_value=1,
             max_value=100,
-            value=10,
             step=1,
+            key="pixel_per_um",
             help="Spatial resolution. Higher values make perimeter "
             "measurements more accurate but the canvas grows quadratically — "
             "expect slow generation above ~20 px/µm for large images.",
@@ -172,7 +197,7 @@ with tab_gen:
             "Image Height (µm)",
             50.0,
             1000.0,
-            200.0,
+            key="image_height_um",
             help="Physical height of the simulated region in microns.",
         )
         volume_fraction = st.number_input(
@@ -262,14 +287,14 @@ with tab_gen:
         )
         allow_overlap = st.checkbox(
             "Allow particle overlap",
-            value=False,
+            key="allow_overlap",
             help="When off, the generator rejects placements within 1.8× the "
             "average radius of an existing particle. Required for very high "
             "volume fractions (≳ 70%).",
         )
         periodic_boundaries = st.checkbox(
             "Periodic boundaries (toroidal)",
-            value=False,
+            key="periodic_boundaries",
             help="When on, the canvas behaves like a torus: particles can "
             "sit anywhere (no edge margin), wrap across the image edges, "
             "and overlap is checked via the minimum image convention. "
@@ -548,10 +573,14 @@ with tab_img:
         "same geometry."
     )
 
+    # The uploader key includes a nonce so "Reset" can clear the files:
+    # bumping the nonce makes Streamlit build a fresh, empty uploader.
+    st.session_state.setdefault("uploader_nonce", 0)
     uploads = st.file_uploader(
         "Micrograph(s)",
         type=["png", "jpg", "jpeg", "tif", "tiff", "bmp"],
         accept_multiple_files=True,
+        key=f"uploads_{st.session_state['uploader_nonce']}",
         help="Multiple images of the same material pool their statistics "
         "for a better estimate.",
     )
@@ -584,11 +613,43 @@ with tab_img:
             "Auto-detect assumes particles are the minority phase.",
         )
 
-    analyze = st.button(
+    # Echo each upload's pixel dimensions and the field of view they imply
+    # at the chosen scale, so a wrong scale is obvious before analyzing.
+    if uploads:
+        for f in uploads:
+            try:
+                w_px, h_px = Image.open(f).size
+                f.seek(0)
+                if img_scale_known and img_pixel_per_um > 0:
+                    st.caption(
+                        f"**{f.name}** — {w_px} × {h_px} px → "
+                        f"{w_px / img_pixel_per_um:.1f} × "
+                        f"{h_px / img_pixel_per_um:.1f} µm "
+                        f"at {img_pixel_per_um:g} px/µm"
+                    )
+                else:
+                    st.caption(f"**{f.name}** — {w_px} × {h_px} px")
+            except Exception:
+                st.caption(f"**{f.name}** — could not read dimensions")
+
+    def _reset_analysis() -> None:
+        st.session_state.pop("img_analysis", None)
+        st.session_state["uploader_nonce"] += 1
+
+    btn_col1, btn_col2 = st.columns([3, 1])
+    analyze = btn_col1.button(
         "Analyze image(s)",
         type="primary",
         width="stretch",
         disabled=not uploads,
+    )
+    btn_col2.button(
+        "🔄 Reset",
+        width="stretch",
+        on_click=_reset_analysis,
+        disabled=not (uploads or st.session_state.get("img_analysis")),
+        help="Clear the uploaded images and the analysis results to start "
+        "over.",
     )
     if analyze and uploads:
         polarity = {
@@ -604,6 +665,7 @@ with tab_img:
         with st.spinner("Segmenting and measuring…"):
             for f in uploads:
                 try:
+                    f.seek(0)
                     gray = np.array(Image.open(f).convert("L"))
                     binary, _ = segment_particles(gray, polarity)
                     binaries.append(binary)
@@ -643,6 +705,10 @@ with tab_img:
                     analysis["suggestion"] = None
                 analysis["previews"] = previews[:4]
                 analysis["n_images"] = len(binaries)
+                # First image's field of view, for transfer to the
+                # Generate tab so the canvases are comparable.
+                analysis["img_h_px"], analysis["img_w_px"] = binaries[0].shape
+                analysis["ppum"] = ppum
             st.session_state["img_analysis"] = analysis
 
     result = st.session_state.get("img_analysis")
@@ -729,11 +795,23 @@ with tab_img:
                 width="stretch",
             )
             if st.session_state.pop("suggestion_applied", False):
-                st.success(
+                applied_msg = (
                     "Applied. Switch to the **Generate** tab — shape, "
                     "diameter, volume fraction, and size distribution are "
-                    "pre-filled — and click **Generate microstructure**."
+                    "pre-filled"
                 )
+                if result.get("ppum"):
+                    applied_msg += (
+                        ", and the canvas size and resolution now match "
+                        "your image so L/A and S/V are directly comparable"
+                    )
+                applied_msg += " — and click **Generate microstructure**."
+                if s.volume_fraction_pct > 15.0:
+                    applied_msg += (
+                        " Particle overlap was enabled so placement can "
+                        "reach the measured volume fraction."
+                    )
+                st.success(applied_msg)
     elif not uploads:
         st.info(
             "Upload at least one micrograph to begin. Nothing here changes "

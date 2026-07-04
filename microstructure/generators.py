@@ -26,13 +26,14 @@ SHAPES = [CIRCULAR, ELLIPTICAL, IRREGULAR, ROUGH_SPHERES, CRACKED_FLAKES, MIXED]
 # Used to estimate how many particles to place to hit a target volume fraction.
 # Circles and rough spheres average to π·r²; the others draw smaller shapes
 # inside that bounding circle, so the factor is less than 1.
+# Calibrated empirically: mean drawn area over 300 draws at r = 40 px.
 # These are open-loop estimates — actual achieved VF is reported separately.
 _EXPECTED_AREA_FACTORS = {
     CIRCULAR: 1.00,
-    ELLIPTICAL: 0.85,     # E[ry] over Uniform(0.5, 1.2) * r
-    IRREGULAR: 0.70,      # bezier blob averages ~70% of its 2r × 2r bbox
-    ROUGH_SPHERES: 1.00,  # symmetric noise → mean radius = r
-    CRACKED_FLAKES: 0.70,
+    ELLIPTICAL: 0.86,      # measured 0.865
+    IRREGULAR: 0.52,       # measured 0.523 — bezier blobs are lean
+    ROUGH_SPHERES: 1.00,   # symmetric noise → mean radius = r (measured 1.019)
+    CRACKED_FLAKES: 0.44,  # measured 0.442 — polygons fill under half the disk
 }
 
 
