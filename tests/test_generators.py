@@ -89,7 +89,10 @@ def test_expected_area_factor_mixed_interpolates():
     # 100% circles → 1.0 (same as pure circular)
     assert gen.expected_area_factor(gen.MIXED, mix_ratio=100) == 1.0
     # 0% circles → mean of elliptical + irregular factors
-    expected = (0.85 + 0.70) / 2.0
+    expected = (
+        gen.expected_area_factor(gen.ELLIPTICAL)
+        + gen.expected_area_factor(gen.IRREGULAR)
+    ) / 2.0
     assert gen.expected_area_factor(gen.MIXED, mix_ratio=0) == pytest.approx(expected)
 
 
