@@ -1,0 +1,58 @@
+# Streamlit Community Cloud puts apps to sleep after several days without
+# traffic. A plain HTTP GET does not count as a visit (the platform tracks
+# real browser sessions over websockets), so this workflow opens the app in
+# headless Chromium once a day, which registers as genuine traffic — and if
+# the app has already gone to sleep, it clicks the wake-up button.
+#
+# Note: GitHub disables scheduled workflows after ~60 days without repo
+# activity. If you get an email about it, re-enable from the Actions tab
+# (any push also resets the clock).
+
+name: Keep Streamlit app awake
+
+on:
+  schedule:
+    - cron: "23 3 * * *"  # daily at 03:23 UTC (odd minute avoids load spikes)
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: Visit app (wake it up if asleep)
+        run: |
+          python - <<'EOF'
+          from playwright.sync_api import sync_playwright
+
+          URL = "https://microstructureinterfaceareacalculator.streamlit.app/"
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch()
+              page = browser.new_page()
+              page.goto(URL, wait_until="load", timeout=120_000)
+              page.wait_for_timeout(10_000)
+
+              # If the app is asleep, Streamlit shows a wake-up button.
+              wake = page.get_by_text("get this app back up", exact=False)
+              if wake.count() > 0:
+                  print("App was asleep — clicking wake-up button.")
+                  wake.first.click()
+                  page.wait_for_timeout(60_000)  # give it time to boot
+              else:
+                  print("App is awake.")
+
+              # Keep the session open briefly so the visit registers.
+              page.wait_for_timeout(20_000)
+              print("Title:", page.title())
+              browser.close()
+          EOF

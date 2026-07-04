@@ -57,14 +57,20 @@ def _colorize(
     return rgb
 
 
-st.set_page_config(page_title="Microstructure Generator", layout="centered")
-st.title("Microstructure Interface Area Calculator")
+st.set_page_config(
+    page_title="Microstructure Generator",
+    page_icon="🔬",
+    layout="centered",
+)
+st.title("🔬 Microstructure Interface Area Calculator")
 st.caption(
     "Simulate 2D microstructures and measure the interfacial length per unit "
     "area — useful for relating microstructure to bulk properties (diffusion, "
     "strength, conductivity)."
 )
+st.divider()
 
+st.markdown("##### Geometry & phase")
 col1, col2 = st.columns(2)
 with col1:
     image_width_um = st.number_input(
@@ -121,7 +127,7 @@ with col2:
         "numbers for the same nominal diameter.",
     )
 
-with st.expander("Advanced settings"):
+with st.expander("⚙️ Advanced settings"):
     size_distribution = st.selectbox(
         "Size distribution",
         dist.DISTRIBUTIONS,
@@ -239,7 +245,7 @@ with st.expander("Advanced settings"):
         else None
     )
 
-with st.expander("Appearance"):
+with st.expander("🎨 Appearance"):
     palette_name = st.selectbox(
         "Colour palette",
         list(_PALETTES.keys()),
@@ -256,12 +262,18 @@ with st.expander("Appearance"):
         ap_col1.color_picker("Particle colour", particle_color, disabled=True)
         ap_col2.color_picker("Matrix colour",   matrix_color,   disabled=True)
 
-calculate = st.button("Calculate", type="primary", key="calculate_gen")
+st.divider()
+calculate = st.button(
+    "Generate microstructure",
+    type="primary",
+    key="calculate_gen",
+    width="stretch",
+)
 if not calculate:
     st.info(
-        "Set your parameters above and click **Calculate** to generate a "
-        "microstructure. Increase **Pixels per Micron** for sharper "
-        "edges; increase the **Image** dimensions for better statistics."
+        "Set your parameters above and click **Generate microstructure**. "
+        "Increase **Pixels per Micron** for sharper edges; increase the "
+        "**Image** dimensions for better statistics."
     )
 else:
     if rng_seed >= 0:
@@ -328,7 +340,7 @@ else:
     pil_rgb = Image.fromarray(_colorize(canvas, particle_color, matrix_color))
     final = add_scale_bar(pil_rgb, image_width_um, image_height_um, pixel_per_um)
 
-    st.markdown("---")
+    st.divider()
     st.subheader("Results")
 
     if len(particles) < num_particles:
@@ -339,50 +351,53 @@ else:
             "Fraction**, or increasing **Image** size."
         )
 
-    col_a, col_b = st.columns(2)
-    col_a.metric("Particles Placed", f"{len(particles)}")
-    col_a.metric(
-        "Interfacial Length",
-        f"{interface_um:.2f} µm",
-        help="Total perimeter of all connected components, in microns, "
-        "measured by the Crofton formula on the rasterized image.",
-    )
-    col_b.metric(
-        "Volume Fraction (achieved)",
-        f"{achieved_vf_pct:.2f}%",
-        delta=f"{achieved_vf_pct - volume_fraction:+.2f}% vs target",
-        delta_color="off",
-        help="Fraction of image pixels occupied by particles. Under "
-        "standard stereological assumptions this equals the 3D volume "
-        "fraction.",
-    )
-    col_b.metric(
-        "Interface / Area (L/A)",
-        f"{ratio:.5f} µm⁻¹",
-        help="Interfacial length divided by image area. A direct, "
-        "resolution-independent measure of how finely the microstructure "
-        "is subdivided. Standard symbol in stereology: L/A.",
-    )
-
-    st.markdown("##### 3D estimate from the 2D section")
-    st.caption("Underwood, 1970")
-    st.metric(
-        "Specific Surface Area (S/V)",
-        f"{s_v_per_um:.5f} µm⁻¹",
-        help="S/V = (4/π) · L/A. Surface area per unit volume in 3D. "
-        "Drives sintering kinetics, gas-solid reaction rates, and "
-        "catalyst activity.",
-    )
-
     st.image(
         np.array(final),
         caption="Simulated Microstructure",
         width="stretch",
     )
 
+    with st.container(border=True):
+        st.markdown("##### 2D section measurements")
+        col_a, col_b = st.columns(2)
+        col_a.metric("Particles Placed", f"{len(particles)}")
+        col_a.metric(
+            "Interfacial Length",
+            f"{interface_um:.2f} µm",
+            help="Total perimeter of all connected components, in microns, "
+            "measured by the Crofton formula on the rasterized image.",
+        )
+        col_b.metric(
+            "Volume Fraction (achieved)",
+            f"{achieved_vf_pct:.2f}%",
+            delta=f"{achieved_vf_pct - volume_fraction:+.2f}% vs target",
+            delta_color="off",
+            help="Fraction of image pixels occupied by particles. Under "
+            "standard stereological assumptions this equals the 3D volume "
+            "fraction.",
+        )
+        col_b.metric(
+            "Interface / Area (L/A)",
+            f"{ratio:.5f} µm⁻¹",
+            help="Interfacial length divided by image area. A direct, "
+            "resolution-independent measure of how finely the microstructure "
+            "is subdivided. Standard symbol in stereology: L/A.",
+        )
+
+    with st.container(border=True):
+        st.markdown("##### 3D estimate from the 2D section")
+        st.caption("Underwood, 1970")
+        st.metric(
+            "Specific Surface Area (S/V)",
+            f"{s_v_per_um:.5f} µm⁻¹",
+            help="S/V = (4/π) · L/A. Surface area per unit volume in 3D. "
+            "Drives sintering kinetics, gas-solid reaction rates, and "
+            "catalyst activity.",
+        )
+
     if particles:
         sizes_um = np.array([2 * p.r_px / pixel_per_um for p in particles])
-        with st.expander("Particle size distribution"):
+        with st.expander("📊 Particle size distribution"):
             bins = max(5, min(40, int(np.sqrt(len(sizes_um)))))
             counts, edges = np.histogram(sizes_um, bins=bins)
             centers_um = 0.5 * (edges[:-1] + edges[1:])
@@ -437,14 +452,16 @@ else:
 
     dl_col1, dl_col2 = st.columns(2)
     dl_col1.download_button(
-        "Download PNG",
+        "🖼️ Download PNG",
         data=png_buf.getvalue(),
         file_name="microstructure.png",
         mime="image/png",
+        width="stretch",
     )
     dl_col2.download_button(
-        "Download metrics (CSV)",
+        "📄 Download metrics (CSV)",
         data=csv_buf.getvalue(),
         file_name="microstructure_metrics.csv",
         mime="text/csv",
+        width="stretch",
     )
