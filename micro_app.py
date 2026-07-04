@@ -703,7 +703,8 @@ with tab_img:
                     "Closest shape preset",
                     s.shape,
                     help="Chosen from the pooled shape descriptors of "
-                    f"{s.n_particles} complete (non-border) particles.",
+                    f"{s.n_particles} complete (non-border) particles, "
+                    "after excluding fine debris.",
                 )
                 dc2.metric(
                     "Median equivalent diameter",
@@ -718,7 +719,8 @@ with tab_img:
                     f"aspect ratio {s.median_aspect:.2f} · "
                     f"solidity {s.median_solidity:.2f} · "
                     f"σ_g {s.sigma_g:.2f} · "
-                    f"n = {s.n_particles} particles"
+                    f"n = {s.n_particles} of {s.n_detected} detected "
+                    "(fine debris excluded from shape/size statistics)"
                 )
 
             st.button(
