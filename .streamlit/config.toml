@@ -1,0 +1,11 @@
+[theme]
+# Clean lab-notebook look: warm off-white canvas, slate text, copper accent.
+base = "light"
+primaryColor = "#B45F2E"
+backgroundColor = "#FBFAF7"
+secondaryBackgroundColor = "#F1EEE7"
+textColor = "#24292F"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
