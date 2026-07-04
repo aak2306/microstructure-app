@@ -9,6 +9,7 @@ from PIL import Image, ImageDraw
 from microstructure import generators as gen
 from microstructure.analysis import (
     classify_shape,
+    drop_fines,
     geometric_std,
     particle_descriptors,
     segment_particles,
@@ -128,12 +129,32 @@ def test_classify_rough_spheres():
     assert classify_shape(0.75, 1.1, 0.95) == gen.ROUGH_SPHERES
 
 
-def test_classify_cracked_flakes():
+def test_classify_cracked_flakes_concave():
     assert classify_shape(0.55, 1.3, 0.75) == gen.CRACKED_FLAKES
 
 
 def test_classify_irregular():
     assert classify_shape(0.5, 1.2, 0.9) == gen.IRREGULAR
+
+
+def test_classify_angular_convex_flakes_not_elliptical():
+    """Angular convex flakes: elongated (aspect 1.89) and solid (0.89),
+    but circularity 0.67 is far below the ~0.85 a smooth ellipse of that
+    aspect would have. Regression test for a real SiC micrograph that
+    was misclassified as Elliptical."""
+    assert classify_shape(0.67, 1.89, 0.89) == gen.CRACKED_FLAKES
+
+
+def test_classify_moderately_elongated_angular_flakes():
+    """Faceted but only mildly elongated (aspect < 1.6) — caught by the
+    smoothness rule, not the aspect rule."""
+    assert classify_shape(0.62, 1.45, 0.90) == gen.CRACKED_FLAKES
+
+
+def test_classify_smooth_ellipse_stays_elliptical():
+    """A genuinely smooth ellipse outline sits close to the theoretical
+    circularity ceiling for its aspect ratio."""
+    assert classify_shape(0.80, 1.9, 0.98) == gen.ELLIPTICAL
 
 
 def test_end_to_end_circles_classified_circular():
@@ -150,6 +171,61 @@ def test_end_to_end_ellipses_classified_elliptical():
     s = suggest_generator_settings([binary], pixel_per_um=2.0)
     assert s.shape == gen.ELLIPTICAL
     assert s.median_aspect > 1.6
+
+
+# ---------------------------------------------------------------------------
+# Fines exclusion
+# ---------------------------------------------------------------------------
+
+def _flakes_with_specks_image(size: int = 400) -> np.ndarray:
+    """9 large circles (the real particles) plus a swarm of small specks."""
+    img = Image.new("L", (size, size), 30)
+    draw = ImageDraw.Draw(img)
+    for i in range(3):
+        for j in range(3):
+            cx, cy = 70 + i * 130, 70 + j * 130
+            draw.ellipse([cx - 25, cy - 25, cx + 25, cy + 25], fill=220)
+    # ~60 specks of radius 3 px (28 px² each — above the noise floor,
+    # tiny next to the 1963 px² circles)
+    rng = np.random.default_rng(7)
+    placed = 0
+    while placed < 60:
+        cx, cy = rng.integers(20, size - 20, size=2)
+        near_circle = any(
+            (cx - (70 + i * 130)) ** 2 + (cy - (70 + j * 130)) ** 2 < 45**2
+            for i in range(3)
+            for j in range(3)
+        )
+        if near_circle:
+            continue
+        draw.ellipse([cx - 3, cy - 3, cx + 3, cy + 3], fill=220)
+        placed += 1
+    return np.array(img)
+
+
+def test_drop_fines_keeps_monodisperse_population_intact():
+    binary, _ = segment_particles(_circles_image(n=12))
+    desc = particle_descriptors([binary])
+    filtered = drop_fines(desc)
+    assert filtered.n_particles == desc.n_particles
+
+
+def test_drop_fines_removes_specks():
+    binary, _ = segment_particles(_flakes_with_specks_image())
+    desc = particle_descriptors([binary])
+    filtered = drop_fines(desc)
+    assert desc.n_particles > 50  # specks were detected
+    assert filtered.n_particles < 15  # ...but excluded from the stats
+
+
+def test_suggestion_diameter_not_dragged_down_by_specks():
+    """Regression: fine debris made the median diameter ~1 px-scale and
+    the generated structure a dust cloud."""
+    binary, _ = segment_particles(_flakes_with_specks_image())
+    s = suggest_generator_settings([binary], pixel_per_um=2.0)
+    # Real particles: radius 25 px → diameter 50 px → 25 µm at 2 px/µm
+    assert s.diameter_um == pytest.approx(25.0, rel=0.10)
+    assert s.n_particles < s.n_detected  # fines were excluded and reported
 
 
 # ---------------------------------------------------------------------------
