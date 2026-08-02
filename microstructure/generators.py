@@ -8,6 +8,8 @@ the caller.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 from PIL import Image, ImageDraw
 from scipy.ndimage import gaussian_filter
@@ -35,6 +37,28 @@ _EXPECTED_AREA_FACTORS = {
     ROUGH_SPHERES: 1.00,   # symmetric noise → mean radius = r (measured 1.019)
     CRACKED_FLAKES: 0.44,  # measured 0.442 — polygons fill under half the disk
 }
+
+
+def overlap_corrected_area_fraction(volume_fraction: float) -> float:
+    """Raw particle-area fraction needed to *cover* ``volume_fraction``.
+
+    When overlap is allowed, particles land independently, so the covered
+    fraction follows the Boolean-model (Poisson) law
+
+        φ_covered = 1 − exp(−φ_raw)
+
+    where φ_raw is the summed particle area over image area. Laying down
+    φ_raw = φ_target therefore lands short — 25.5% of raw area covers only
+    22.6% of the image, because later particles fall partly on earlier
+    ones. Inverting gives φ_raw = −ln(1 − φ_covered).
+
+    With overlap disallowed the hard-core placement wastes no area and no
+    correction applies, so callers should only use this when overlap is
+    enabled. Values at or above 1 are clamped just below to keep the
+    logarithm finite.
+    """
+    phi = min(max(volume_fraction, 0.0), 0.999)
+    return -math.log(1.0 - phi)
 
 
 def expected_area_factor(shape: str, mix_ratio: int | None = None) -> float:

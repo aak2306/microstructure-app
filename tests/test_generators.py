@@ -107,3 +107,25 @@ def test_paste_blob_is_idempotent_after_optimization():
     assert int((arr > 0).sum()) > 0
     assert arr[0, :].sum() == 0  # top row untouched
     assert arr[-1, :].sum() == 0  # bottom row untouched
+
+
+def test_overlap_correction_is_identity_at_zero():
+    assert gen.overlap_corrected_area_fraction(0.0) == pytest.approx(0.0)
+
+
+def test_overlap_correction_exceeds_target_and_inverts_poisson():
+    """Laying down the corrected raw area must cover exactly the target."""
+    import math
+
+    for phi in (0.05, 0.20, 0.30, 0.50):
+        raw = gen.overlap_corrected_area_fraction(phi)
+        assert raw > phi  # always need more raw area than coverage
+        assert 1.0 - math.exp(-raw) == pytest.approx(phi, rel=1e-9)
+
+
+def test_overlap_correction_clamps_near_unity():
+    """Must stay finite at φ = 1 rather than diverging."""
+    assert gen.overlap_corrected_area_fraction(1.0) == pytest.approx(
+        gen.overlap_corrected_area_fraction(0.999)
+    )
+    assert gen.overlap_corrected_area_fraction(2.0) < 10.0
