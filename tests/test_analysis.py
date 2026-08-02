@@ -8,10 +8,12 @@ from PIL import Image, ImageDraw
 
 from microstructure import generators as gen
 from microstructure.analysis import (
+    area_weighted_mean_diameter,
     classify_shape,
     drop_fines,
     geometric_std,
     particle_descriptors,
+    remove_small_particles,
     segment_particles,
     suggest_generator_settings,
 )
@@ -226,6 +228,113 @@ def test_suggestion_diameter_not_dragged_down_by_specks():
     # Real particles: radius 25 px → diameter 50 px → 25 µm at 2 px/µm
     assert s.diameter_um == pytest.approx(25.0, rel=0.10)
     assert s.n_particles < s.n_detected  # fines were excluded and reported
+
+
+# ---------------------------------------------------------------------------
+# Area-weighted diameter
+# ---------------------------------------------------------------------------
+
+def test_area_weighted_equals_value_for_monodisperse():
+    d = np.full(20, 40.0)
+    assert area_weighted_mean_diameter(d) == pytest.approx(40.0)
+
+
+def test_area_weighted_far_exceeds_number_average_with_many_specks():
+    """10 real particles plus 500 specks. The number statistics collapse
+    to speck scale; the area-weighted mean stays within the same order
+    of magnitude as the real particles."""
+    both = np.concatenate([np.full(10, 100.0), np.full(500, 2.0)])
+    assert np.median(both) == 2.0  # number median is pure speck
+    assert np.mean(both) < 4.0  # number mean nearly as bad
+    assert area_weighted_mean_diameter(both) == pytest.approx(51.0, rel=0.01)
+
+
+def test_area_weighted_exceeds_number_median_for_skewed_population():
+    d = np.concatenate([np.full(100, 5.0), np.full(5, 80.0)])
+    assert area_weighted_mean_diameter(d) == pytest.approx(38.3, rel=0.01)
+    assert area_weighted_mean_diameter(d) > 7 * np.median(d)
+
+
+def test_area_weighted_handles_empty_and_zero():
+    assert area_weighted_mean_diameter(np.array([])) == 0.0
+    assert area_weighted_mean_diameter(np.zeros(5)) == 0.0
+
+
+def test_area_weighted_diameter_reproduces_l_a_and_vf():
+    """The defining property: n circles of diameter D with n·D = Σd
+    match a polydisperse population's VF *and* L/A simultaneously."""
+    rng = np.random.default_rng(0)
+    d = np.exp(rng.normal(np.log(30), np.log(1.8), size=2000))
+    D = area_weighted_mean_diameter(d)
+    n = np.sum(d) / D  # count fixed by matching L/A
+    assert n * D**2 == pytest.approx(np.sum(d**2), rel=1e-9)  # VF matches too
+
+
+# ---------------------------------------------------------------------------
+# Manual size floor
+# ---------------------------------------------------------------------------
+
+def test_remove_small_particles_drops_specks_keeps_particles():
+    binary, _ = segment_particles(_flakes_with_specks_image())
+    before = int(binary.sum())
+    cleaned = remove_small_particles(binary, min_diameter_px=20.0)
+    # The 9 circles of radius 25 survive; the radius-3 specks do not.
+    assert particle_descriptors([cleaned]).n_particles == 9
+    assert int(cleaned.sum()) < before
+
+
+def test_remove_small_particles_zero_floor_is_a_no_op():
+    binary, _ = segment_particles(_circles_image())
+    assert np.array_equal(remove_small_particles(binary, 0.0), binary)
+
+
+def test_remove_small_particles_cuts_perimeter_more_than_area():
+    """The point of the filter: specks are a big share of interfacial
+    length but a small share of phase area."""
+    from microstructure.metrics import interfacial_length_um
+
+    binary, _ = segment_particles(_flakes_with_specks_image())
+    cleaned = remove_small_particles(binary, min_diameter_px=20.0)
+    area_kept = cleaned.sum() / binary.sum()
+    perim_kept = interfacial_length_um(cleaned, 1.0) / interfacial_length_um(
+        binary, 1.0
+    )
+    # Specks are ~11% of the phase area but ~46% of the interfacial
+    # length — which is exactly why they wreck a measured S/V.
+    assert area_kept > 0.85
+    assert perim_kept < 0.65
+    assert perim_kept < area_kept
+
+
+def test_min_diameter_px_filters_small_particles():
+    binary, _ = segment_particles(_flakes_with_specks_image())
+    unfiltered = particle_descriptors([binary])
+    filtered = particle_descriptors([binary], min_diameter_px=20.0)
+    assert filtered.n_particles < unfiltered.n_particles
+    assert filtered.equivalent_diameter_px.min() >= 20.0
+
+
+def test_min_diameter_px_zero_is_a_no_op():
+    binary, _ = segment_particles(_circles_image())
+    assert (
+        particle_descriptors([binary], min_diameter_px=0.0).n_particles
+        == particle_descriptors([binary]).n_particles
+    )
+
+
+def test_min_diameter_px_too_high_raises_helpful_error():
+    binary, _ = segment_particles(_circles_image())
+    with pytest.raises(ValueError, match="minimum particle size"):
+        suggest_generator_settings([binary], 1.0, min_diameter_px=10_000.0)
+
+
+def test_suggestion_reports_both_diameters():
+    binary, _ = segment_particles(_flakes_with_specks_image())
+    s = suggest_generator_settings([binary], pixel_per_um=2.0)
+    # Real particles are radius 25 px → diameter 50 px
+    assert s.diameter_px == pytest.approx(50.0, rel=0.10)
+    assert s.median_diameter_px > 0
+    assert s.diameters_px.size == s.n_particles
 
 
 # ---------------------------------------------------------------------------

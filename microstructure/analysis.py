@@ -60,6 +60,28 @@ def segment_particles(
     return binary, particles_are_bright
 
 
+def remove_small_particles(
+    binary: np.ndarray, min_diameter_px: float
+) -> np.ndarray:
+    """Drop connected components below ``min_diameter_px`` equivalent diameter.
+
+    Applied to the binary *before* any measurement, so that a size floor
+    the user sets is honoured consistently: the excluded specks vanish
+    from the segmentation preview, from the volume fraction, and from
+    L/A and S/V alike.
+
+    This matters most for S/V. Fine debris has a very high
+    perimeter-to-area ratio, so a swarm of specks can contribute a large
+    share of the total interfacial length while being a negligible share
+    of the phase area — inflating a "measured" S/V that is really an
+    artefact of segmentation noise.
+    """
+    if min_diameter_px <= 0:
+        return binary
+    min_area = math.pi * (min_diameter_px / 2.0) ** 2
+    return remove_small_objects(binary, min_size=int(math.ceil(min_area)))
+
+
 @dataclass(frozen=True)
 class ParticleDescriptors:
     """Pooled per-particle descriptor arrays for one or more binaries."""
@@ -75,13 +97,19 @@ class ParticleDescriptors:
         return int(self.circularity.size)
 
 
-def particle_descriptors(binaries: list[np.ndarray]) -> ParticleDescriptors:
+def particle_descriptors(
+    binaries: list[np.ndarray], min_diameter_px: float = 0.0
+) -> ParticleDescriptors:
     """Measure per-particle shape descriptors, pooled across images.
 
     Particles touching the image border are excluded from the *shape*
     statistics (their outlines are cut, which corrupts circularity and
     aspect ratio) but still count toward area-based metrics computed
     elsewhere.
+
+    ``min_diameter_px`` drops anything whose equivalent diameter is below
+    that floor — a manual override for images where scratches, staining,
+    or pitting survive thresholding as spurious "particles".
     """
     circ: list[float] = []
     aspect: list[float] = []
@@ -99,6 +127,8 @@ def particle_descriptors(binaries: list[np.ndarray]) -> ParticleDescriptors:
                 continue  # cut by the image edge
             perimeter = region.perimeter_crofton
             if perimeter <= 0:
+                continue
+            if region.equivalent_diameter_area < min_diameter_px:
                 continue
             circ.append(min(1.0, 4 * math.pi * region.area / perimeter**2))
             minor = region.axis_minor_length
@@ -198,14 +228,42 @@ def geometric_std(diameters: np.ndarray) -> float:
     return float(np.exp(np.std(np.log(diameters))))
 
 
+def area_weighted_mean_diameter(diameters: np.ndarray) -> float:
+    """Area-weighted mean diameter D = Σd² / Σd — the 2D Sauter diameter.
+
+    This is the diameter a *monodisperse* simulation must use to
+    reproduce both the volume fraction and the interfacial length of a
+    polydisperse population, which is what makes the simulated S/V match
+    the micrograph's. For N circles of diameter dᵢ in an image of area A:
+
+        L/A = π·Σdᵢ / A          VF = π·Σdᵢ² / (4A)
+
+    Generating n circles of a single diameter D and demanding both match
+    gives n·D = Σdᵢ and n·D² = Σdᵢ², hence D = Σdᵢ² / Σdᵢ.
+
+    It is far more robust to fine debris than the number median, which a
+    swarm of specks captures outright. It is not *immune*: fines carry
+    real perimeter, so enough of them do pull it down — which is correct
+    behaviour when the fines are real material, and why spurious ones
+    are removed first by ``drop_fines`` and the manual size floor.
+    """
+    if diameters.size == 0:
+        return 0.0
+    total = float(np.sum(diameters))
+    if total <= 0:
+        return 0.0
+    return float(np.sum(diameters**2) / total)
+
+
 @dataclass(frozen=True)
 class GeneratorSuggestion:
     """Generator settings inferred from uploaded micrographs."""
 
     shape: str
     volume_fraction_pct: float
-    diameter_um: float | None  # None when the image scale is unknown
-    diameter_px: float
+    diameter_um: float | None  # area-weighted; None when scale is unknown
+    diameter_px: float  # area-weighted mean diameter Σd²/Σd
+    median_diameter_px: float  # number median, reported for comparison
     sigma_g: float
     bumpiness_pct: float
     n_particles: int  # particles used for shape/size stats (fines excluded)
@@ -213,22 +271,31 @@ class GeneratorSuggestion:
     median_circularity: float
     median_aspect: float
     median_solidity: float
+    diameters_px: np.ndarray  # kept particles, for the size histogram
 
 
 def suggest_generator_settings(
-    binaries: list[np.ndarray], pixel_per_um: float | None
+    binaries: list[np.ndarray],
+    pixel_per_um: float | None,
+    min_diameter_px: float = 0.0,
 ) -> GeneratorSuggestion:
     """Pool descriptors across ``binaries`` and propose generator settings.
 
     Shape and size statistics are computed on the coarse population only
     (see ``drop_fines``); volume fraction uses every particle pixel, since
-    fines are real phase area even when they shouldn't steer the median.
+    fines are real phase area even when they shouldn't steer the size.
+
+    The reported diameter is the *area-weighted* mean (see
+    ``area_weighted_mean_diameter``) rather than the number median, so
+    that a simulation built from it reproduces the micrograph's L/A and
+    S/V — and so that surviving fine debris cannot deflate it.
     """
-    all_desc = particle_descriptors(binaries)
+    all_desc = particle_descriptors(binaries, min_diameter_px)
     if all_desc.n_particles == 0:
         raise ValueError(
-            "no complete particles found — check the segmentation polarity "
-            "or use an image where particles do not all touch the border"
+            "no complete particles found — check the segmentation polarity, "
+            "lower the minimum particle size, or use an image where "
+            "particles do not all touch the border"
         )
     desc = drop_fines(all_desc)
 
@@ -241,7 +308,8 @@ def suggest_generator_settings(
     particle_px = sum(int(b.sum()) for b in binaries)
     vf_pct = 100.0 * particle_px / total_px
 
-    d_px = float(np.median(desc.equivalent_diameter_px))
+    d_px = area_weighted_mean_diameter(desc.equivalent_diameter_px)
+    d_median_px = float(np.median(desc.equivalent_diameter_px))
     d_um = d_px / pixel_per_um if pixel_per_um else None
 
     # Rough-sphere bumpiness from the circularity deficit: a smooth circle
@@ -254,6 +322,7 @@ def suggest_generator_settings(
         volume_fraction_pct=vf_pct,
         diameter_um=d_um,
         diameter_px=d_px,
+        median_diameter_px=d_median_px,
         sigma_g=geometric_std(desc.equivalent_diameter_px),
         bumpiness_pct=bumpiness,
         n_particles=desc.n_particles,
@@ -261,4 +330,5 @@ def suggest_generator_settings(
         median_circularity=circ_med,
         median_aspect=aspect_med,
         median_solidity=solidity_med,
+        diameters_px=desc.equivalent_diameter_px,
     )

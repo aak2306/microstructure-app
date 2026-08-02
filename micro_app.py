@@ -19,6 +19,7 @@ from PIL import Image
 from microstructure import distributions as dist
 from microstructure import generators as gen
 from microstructure.analysis import (
+    remove_small_particles,
     segment_particles,
     suggest_generator_settings,
 )
@@ -612,6 +613,20 @@ with tab_img:
             help="Which phase is the particles after thresholding. "
             "Auto-detect assumes particles are the minority phase.",
         )
+        min_feature_um = st.number_input(
+            "Ignore features smaller than (µm)"
+            if img_scale_known
+            else "Ignore features smaller than (px)",
+            min_value=0.0,
+            max_value=1000.0,
+            value=0.0,
+            step=0.1,
+            format="%.2f",
+            help="Manual size floor for scratches, staining, or pitting "
+            "that survive thresholding. 0 relies on the automatic "
+            "fine-debris filter alone. Raise it if the size histogram "
+            "below shows a spurious spike at the smallest sizes.",
+        )
 
     # Echo each upload's pixel dimensions and the field of view they imply
     # at the chosen scale, so a wrong scale is obvious before analyzing.
@@ -659,15 +674,27 @@ with tab_img:
         }[polarity_choice]
         ppum = float(img_pixel_per_um) if img_scale_known else None
 
+        min_d_px = (
+            min_feature_um * ppum
+            if (img_scale_known and ppum)
+            else min_feature_um
+        )
+
         binaries: list[np.ndarray] = []
         previews: list[tuple[str, np.ndarray, np.ndarray]] = []
         errors: list[str] = []
+        perimeter_dropped_pct = 0.0
         with st.spinner("Segmenting and measuring…"):
+            raw_interface = 0.0
             for f in uploads:
                 try:
                     f.seek(0)
                     gray = np.array(Image.open(f).convert("L"))
                     binary, _ = segment_particles(gray, polarity)
+                    if min_d_px > 0:
+                        if ppum:
+                            raw_interface += interfacial_length_um(binary, ppum)
+                        binary = remove_small_particles(binary, min_d_px)
                     binaries.append(binary)
                     previews.append(
                         (
@@ -695,14 +722,43 @@ with tab_img:
                     la = total_interface_um / total_area_um2
                     analysis["la_per_um"] = la
                     analysis["sv_per_um"] = specific_surface_area_per_um(la)
+                    if raw_interface > 0:
+                        perimeter_dropped_pct = 100.0 * (
+                            1.0 - total_interface_um / raw_interface
+                        )
+                        analysis["perimeter_dropped_pct"] = (
+                            perimeter_dropped_pct
+                        )
 
                 try:
                     analysis["suggestion"] = suggest_generator_settings(
-                        binaries, ppum
+                        binaries, ppum, min_diameter_px=min_d_px
                     )
                 except ValueError as exc:
                     errors.append(str(exc))
                     analysis["suggestion"] = None
+                # Diagnostic: how much interfacial length would disappear
+                # if the automatically-detected fines were removed. A large
+                # share means the measured S/V is dominated by specks and
+                # will not match a simulation built from the coarse shapes.
+                sugg = analysis.get("suggestion")
+                if ppum and sugg is not None and min_d_px <= 0:
+                    auto_floor = 0.25 * sugg.diameter_px
+                    kept = sum(
+                        interfacial_length_um(
+                            remove_small_particles(b, auto_floor), ppum
+                        )
+                        for b in binaries
+                    )
+                    full = sum(
+                        interfacial_length_um(b, ppum) for b in binaries
+                    )
+                    if full > 0:
+                        analysis["fines_perimeter_share_pct"] = 100.0 * (
+                            1.0 - kept / full
+                        )
+                        analysis["suggested_floor_um"] = auto_floor / ppum
+
                 analysis["previews"] = previews[:4]
                 analysis["n_images"] = len(binaries)
                 # First image's field of view, for transfer to the
@@ -719,6 +775,19 @@ with tab_img:
     if result and result.get("n_images"):
         st.divider()
         st.subheader("Image analysis")
+
+        share = result.get("fines_perimeter_share_pct")
+        if share and share > 25.0:
+            st.warning(
+                f"Fine features contribute about **{share:.0f}% of the "
+                "measured interfacial length** while being a small part of "
+                "the phase area. If they are polishing debris or "
+                "segmentation noise rather than real particles, the L/A and "
+                "S/V below are inflated and will not match a simulation of "
+                "the coarse particles. Set **Ignore features smaller than** "
+                f"to about **{result['suggested_floor_um']:.2f} µm** and "
+                "re-analyze to exclude them."
+            )
 
         for name, gray_prev, bin_prev in result["previews"]:
             pc1, pc2 = st.columns(2)
@@ -759,6 +828,13 @@ with tab_img:
                     "Provide the image scale to get L/A and S/V in absolute "
                     "units."
                 )
+            dropped = result.get("perimeter_dropped_pct")
+            if dropped and dropped > 1.0:
+                st.caption(
+                    f"Features below the size floor carried {dropped:.0f}% "
+                    "of the raw interfacial length and are excluded from "
+                    "these numbers."
+                )
 
         s = result.get("suggestion")
         if s:
@@ -772,13 +848,22 @@ with tab_img:
                     f"{s.n_particles} complete (non-border) particles, "
                     "after excluding fine debris.",
                 )
+                ppum_used = result.get("ppum")
                 dc2.metric(
-                    "Median equivalent diameter",
+                    "Area-weighted diameter",
                     f"{s.diameter_um:.2f} µm"
                     if s.diameter_um is not None
                     else f"{s.diameter_px:.1f} px",
-                    help="Diameter of the circle with the same area as the "
-                    "median particle.",
+                    help="D = Σd²/Σd, the diameter that reproduces both the "
+                    "volume fraction and the interfacial length of your "
+                    "particles — so the simulated S/V matches the "
+                    "micrograph. Fine debris barely shifts it, unlike a "
+                    "number-weighted average.",
+                )
+                median_txt = (
+                    f"{s.median_diameter_px / ppum_used:.2f} µm"
+                    if ppum_used
+                    else f"{s.median_diameter_px:.1f} px"
                 )
                 st.caption(
                     f"circularity {s.median_circularity:.2f} · "
@@ -786,8 +871,32 @@ with tab_img:
                     f"solidity {s.median_solidity:.2f} · "
                     f"σ_g {s.sigma_g:.2f} · "
                     f"n = {s.n_particles} of {s.n_detected} detected "
-                    "(fine debris excluded from shape/size statistics)"
+                    "(fine debris excluded) · "
+                    f"number-median diameter {median_txt}"
                 )
+
+                if s.diameters_px.size:
+                    with st.expander("📊 Detected size distribution"):
+                        d_vals = (
+                            s.diameters_px / ppum_used
+                            if ppum_used
+                            else s.diameters_px
+                        )
+                        unit = "µm" if ppum_used else "px"
+                        bins = max(5, min(40, int(np.sqrt(d_vals.size))))
+                        counts, edges = np.histogram(d_vals, bins=bins)
+                        centers = 0.5 * (edges[:-1] + edges[1:])
+                        hist_df = pd.DataFrame(
+                            {"count": counts}, index=np.round(centers, 2)
+                        )
+                        hist_df.index.name = f"diameter ({unit})"
+                        st.bar_chart(hist_df, height=240)
+                        st.caption(
+                            "Particles used for the shape and size "
+                            "statistics. A tall spike against the left edge "
+                            "means debris is still getting through — raise "
+                            "**Ignore features smaller than** and re-analyze."
+                        )
 
             st.button(
                 "📥 Apply these settings to the Generate tab",
