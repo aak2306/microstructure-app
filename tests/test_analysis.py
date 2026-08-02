@@ -15,6 +15,7 @@ from microstructure.analysis import (
     particle_descriptors,
     remove_small_particles,
     segment_particles,
+    split_touching_particles,
     suggest_generator_settings,
 )
 
@@ -370,3 +371,64 @@ def test_suggestion_raises_when_no_particles():
     empty = np.zeros((100, 100), dtype=bool)
     with pytest.raises(ValueError):
         suggest_generator_settings([empty], pixel_per_um=1.0)
+
+
+# ---------------------------------------------------------------------------
+# Watershed splitting of touching particles
+# ---------------------------------------------------------------------------
+
+def _touching_pair_image(size: int = 300, r: int = 40) -> np.ndarray:
+    """Two circles overlapping slightly — one blob under plain labelling."""
+    img = Image.new("L", (size, size), 30)
+    draw = ImageDraw.Draw(img)
+    cy = size // 2
+    for cx in (size // 2 - r + 8, size // 2 + r - 8):
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=220)
+    return np.array(img)
+
+
+def test_plain_labelling_fuses_touching_particles():
+    binary, _ = segment_particles(_touching_pair_image())
+    assert particle_descriptors([binary], split_touching=False).n_particles == 1
+
+
+def test_splitting_separates_touching_particles():
+    binary, _ = segment_particles(_touching_pair_image())
+    assert particle_descriptors([binary], split_touching=True).n_particles == 2
+
+
+def test_splitting_recovers_true_particle_size():
+    """The fused blob reads far too large; splitting restores ~2r."""
+    r = 40
+    binary, _ = segment_particles(_touching_pair_image(r=r))
+    fused = particle_descriptors([binary], split_touching=False)
+    split = particle_descriptors([binary], split_touching=True)
+    assert fused.equivalent_diameter_px[0] > 1.3 * 2 * r
+    assert np.median(split.equivalent_diameter_px) == pytest.approx(
+        2 * r, rel=0.15
+    )
+
+
+def test_splitting_leaves_isolated_particles_alone():
+    binary, _ = segment_particles(_circles_image(n=9, r=20))
+    without = particle_descriptors([binary], split_touching=False)
+    with_split = particle_descriptors([binary], split_touching=True)
+    assert with_split.n_particles == without.n_particles
+    assert np.median(with_split.equivalent_diameter_px) == pytest.approx(
+        np.median(without.equivalent_diameter_px), rel=0.05
+    )
+
+
+def test_splitting_fixes_shape_classification_of_fused_cluster():
+    """A fused pair looks elongated and non-circular; split, it is circular."""
+    binary, _ = segment_particles(_touching_pair_image())
+    fused = suggest_generator_settings([binary], 1.0, split_touching=False)
+    split = suggest_generator_settings([binary], 1.0, split_touching=True)
+    assert fused.median_aspect > 1.6
+    assert split.median_aspect < 1.3
+    assert split.shape in (gen.CIRCULAR, gen.ROUGH_SPHERES)
+
+
+def test_split_touching_particles_handles_empty_binary():
+    empty = np.zeros((50, 50), dtype=bool)
+    assert split_touching_particles(empty).max() == 0
