@@ -380,6 +380,11 @@ with tab_gen:
         canvas = np.zeros((height_px, width_px), dtype=np.uint8)
 
         rad_um = particle_diameter_um / 2
+        # Particles are drawn at an integer pixel radius, so base the count
+        # estimate on the radius actually used rather than the ideal one —
+        # otherwise the rounding loss shows up as a volume-fraction deficit.
+        avg_rad_px = max(1, int(round(rad_um * pixel_per_um)))
+        effective_rad_um = avg_rad_px / pixel_per_um
         area_factor = gen.expected_area_factor(shape, mix_ratio)
         dist_factor = dist.expected_r2_factor(
             size_distribution,
@@ -388,11 +393,16 @@ with tab_gen:
             normal_sigma_pct=normal_sigma_pct,
             rr_shape_n=rr_shape_n,
         )
-        shape_area_um2 = np.pi * rad_um**2 * area_factor * dist_factor
-        area_target_um2 = image_width_um * image_height_um * volume_fraction / 100
-        num_particles = max(1, int(area_target_um2 / shape_area_um2))
+        shape_area_um2 = np.pi * effective_rad_um**2 * area_factor * dist_factor
+        # Overlapping particles hide part of each other, so the summed
+        # particle area must exceed the target coverage. Non-overlapping
+        # placement wastes nothing and needs no correction.
+        target_frac = volume_fraction / 100
+        if allow_overlap:
+            target_frac = gen.overlap_corrected_area_fraction(target_frac)
+        area_target_um2 = image_width_um * image_height_um * target_frac
+        num_particles = max(1, round(area_target_um2 / shape_area_um2))
 
-        avg_rad_px = max(1, int(rad_um * pixel_per_um))
         pil_img = Image.fromarray(canvas)
 
         size_sampler = dist.make_size_sampler(
