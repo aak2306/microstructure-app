@@ -64,6 +64,28 @@ def _colorize(
     return rgb
 
 
+def _crop_borders(
+    arr: np.ndarray, top_pct: float, bottom_pct: float,
+    left_pct: float, right_pct: float,
+) -> np.ndarray:
+    """Trim percentage margins off each edge of a 2D array.
+
+    Micrographs from papers and instrument software usually carry a
+    scale bar, a magnification banner, or a figure label burned into the
+    image. Those are high-contrast marks that threshold as particles and
+    can badly skew the interfacial length — on a sparse micrograph the
+    scale bar alone inflated L/A by 21%.
+    """
+    h, w = arr.shape[:2]
+    r0 = int(h * top_pct / 100)
+    r1 = h - int(h * bottom_pct / 100)
+    c0 = int(w * left_pct / 100)
+    c1 = w - int(w * right_pct / 100)
+    if r1 - r0 < 10 or c1 - c0 < 10:
+        return arr  # refuse to crop away the whole image
+    return arr[r0:r1, c0:c1]
+
+
 def _shrink_for_preview(arr: np.ndarray, max_w: int = 480) -> np.ndarray:
     """Downscale a 2D uint8 array for display so session state stays small."""
     im = Image.fromarray(arr)
@@ -647,13 +669,40 @@ with tab_img:
             "below shows a spurious spike at the smallest sizes.",
         )
 
+    with st.expander("✂️ Crop borders — remove scale bars, labels, banners"):
+        st.caption(
+            "Anything burned into the image — a scale bar, a magnification "
+            "banner, an \"(a)\" figure label — thresholds as a particle and "
+            "distorts the results. On one test micrograph the scale bar "
+            "alone inflated L/A by 21%. Trim those margins off here; the "
+            "preview below shows exactly what gets analyzed."
+        )
+        cc1, cc2, cc3, cc4 = st.columns(4)
+        crop_top = cc1.number_input(
+            "Top %", min_value=0.0, max_value=40.0, value=0.0, step=1.0
+        )
+        crop_bottom = cc2.number_input(
+            "Bottom %", min_value=0.0, max_value=40.0, value=0.0, step=1.0,
+            help="Most common: journal figures put the scale bar here.",
+        )
+        crop_left = cc3.number_input(
+            "Left %", min_value=0.0, max_value=40.0, value=0.0, step=1.0
+        )
+        crop_right = cc4.number_input(
+            "Right %", min_value=0.0, max_value=40.0, value=0.0, step=1.0
+        )
+
     # Echo each upload's pixel dimensions and the field of view they imply
     # at the chosen scale, so a wrong scale is obvious before analyzing.
     if uploads:
         for f in uploads:
             try:
-                w_px, h_px = Image.open(f).size
+                probe = np.array(Image.open(f).convert("L"))
                 f.seek(0)
+                probe = _crop_borders(
+                    probe, crop_top, crop_bottom, crop_left, crop_right
+                )
+                h_px, w_px = probe.shape
                 if img_scale_known and img_pixel_per_um > 0:
                     st.caption(
                         f"**{f.name}** — {w_px} × {h_px} px → "
@@ -709,6 +758,9 @@ with tab_img:
                 try:
                     f.seek(0)
                     gray = np.array(Image.open(f).convert("L"))
+                    gray = _crop_borders(
+                        gray, crop_top, crop_bottom, crop_left, crop_right
+                    )
                     binary, _ = segment_particles(gray, polarity)
                     if min_d_px > 0:
                         if ppum:

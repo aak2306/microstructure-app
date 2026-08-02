@@ -432,3 +432,43 @@ def test_splitting_fixes_shape_classification_of_fused_cluster():
 def test_split_touching_particles_handles_empty_binary():
     empty = np.zeros((50, 50), dtype=bool)
     assert split_touching_particles(empty).max() == 0
+
+
+# ---------------------------------------------------------------------------
+# Border cropping (removing burnt-in scale bars / labels)
+# ---------------------------------------------------------------------------
+
+def test_crop_borders_trims_expected_shape():
+    from micro_app import _crop_borders
+
+    a = np.zeros((200, 400), dtype=np.uint8)
+    assert _crop_borders(a, 10, 10, 0, 0).shape == (160, 400)
+    assert _crop_borders(a, 0, 0, 25, 25).shape == (200, 200)
+    assert _crop_borders(a, 0, 0, 0, 0).shape == (200, 400)
+
+
+def test_crop_borders_refuses_to_erase_image():
+    from micro_app import _crop_borders
+
+    # 40% off each side of 50 px leaves exactly 10 px, which is allowed;
+    # anything that would leave under 10 px returns the image untouched.
+    a = np.zeros((50, 50), dtype=np.uint8)
+    assert _crop_borders(a, 40, 40, 40, 40).shape == (10, 10)
+    b = np.zeros((20, 20), dtype=np.uint8)
+    assert _crop_borders(b, 40, 40, 0, 0).shape == (20, 20)
+
+
+def test_crop_removes_a_burnt_in_scale_bar():
+    """A dark bar in the bottom margin reads as a particle until cropped."""
+    img = Image.new("L", (400, 400), 30)
+    draw = ImageDraw.Draw(img)
+    draw.ellipse([100, 100, 200, 200], fill=220)   # one real particle
+    draw.rectangle([20, 370, 260, 382], fill=220)  # burnt-in scale bar
+    gray = np.array(img)
+
+    from micro_app import _crop_borders
+
+    binary_full, _ = segment_particles(gray)
+    binary_crop, _ = segment_particles(_crop_borders(gray, 0, 12, 0, 0))
+    assert particle_descriptors([binary_full]).n_particles == 2
+    assert particle_descriptors([binary_crop]).n_particles == 1
