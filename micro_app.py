@@ -623,6 +623,15 @@ with tab_img:
             help="Which phase is the particles after thresholding. "
             "Auto-detect assumes particles are the minority phase.",
         )
+        split_touching = st.checkbox(
+            "Separate touching particles",
+            value=True,
+            help="Watershed-splits particles that are in contact before "
+            "measuring their size and shape. Without it, dense structures "
+            "report fused clusters as single oversized particles and get "
+            "classified as irregular. Volume fraction, L/A and S/V are "
+            "unaffected — a split line is not a real interface.",
+        )
         min_feature_um = st.number_input(
             "Ignore features smaller than (µm)"
             if img_scale_known
@@ -742,7 +751,10 @@ with tab_img:
 
                 try:
                     analysis["suggestion"] = suggest_generator_settings(
-                        binaries, ppum, min_diameter_px=min_d_px
+                        binaries,
+                        ppum,
+                        min_diameter_px=min_d_px,
+                        split_touching=split_touching,
                     )
                 except ValueError as exc:
                     errors.append(str(exc))

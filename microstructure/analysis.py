@@ -25,9 +25,12 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
+from scipy import ndimage as ndi
+from skimage.feature import peak_local_max
 from skimage.filters import threshold_otsu
 from skimage.measure import label, regionprops
 from skimage.morphology import remove_small_objects
+from skimage.segmentation import watershed
 
 from . import generators as gen
 
@@ -97,8 +100,61 @@ class ParticleDescriptors:
         return int(self.circularity.size)
 
 
+def _labelled_diameters(lab: np.ndarray) -> np.ndarray:
+    """Equivalent diameters of interior regions above the noise floor."""
+    h, w = lab.shape
+    out = []
+    for r in regionprops(lab):
+        if r.area < MIN_PARTICLE_PX:
+            continue
+        r0, c0, r1, c1 = r.bbox
+        if r0 == 0 or c0 == 0 or r1 == h or c1 == w:
+            continue
+        out.append(r.equivalent_diameter_area)
+    return np.array(out)
+
+
+def split_touching_particles(binary: np.ndarray) -> np.ndarray:
+    """Label ``binary``, separating particles that merely touch.
+
+    Above roughly 25% volume fraction, neighbouring particles come into
+    contact and plain connected-component labelling fuses each cluster
+    into one region. That inflates the measured size and drives the shape
+    classifier toward the irregular presets even when the particles are
+    plainly convex — on a 35% alumina micrograph it reported 9.4 µm
+    "cracked flakes" for what are 5.9 µm spheres.
+
+    A distance transform peaks at the centre of each particle, so
+    watershed flooding from those peaks cuts the necks between them. The
+    peak separation is set from a first pass at the particle size, which
+    keeps a single particle from being carved up while still splitting
+    genuine pairs.
+
+    Only *size and shape* statistics should use this. Volume fraction and
+    interfacial length must come from the unsplit binary, since a
+    watershed cut is an internal line, not a real phase boundary.
+    """
+    first_pass = _labelled_diameters(label(binary))
+    if first_pass.size == 0:
+        return label(binary)
+    # Area-weighted radius: robust to the fines that would otherwise make
+    # the peak separation far too small.
+    r_est = 0.5 * float((first_pass**2).sum() / first_pass.sum())
+    min_distance = max(3, int(round(0.6 * r_est)))
+
+    distance = ndi.distance_transform_edt(binary)
+    coords = peak_local_max(distance, min_distance=min_distance, labels=binary)
+    if coords.size == 0:
+        return label(binary)
+    markers = np.zeros(distance.shape, dtype=bool)
+    markers[tuple(coords.T)] = True
+    return watershed(-distance, label(markers), mask=binary)
+
+
 def particle_descriptors(
-    binaries: list[np.ndarray], min_diameter_px: float = 0.0
+    binaries: list[np.ndarray],
+    min_diameter_px: float = 0.0,
+    split_touching: bool = True,
 ) -> ParticleDescriptors:
     """Measure per-particle shape descriptors, pooled across images.
 
@@ -110,6 +166,10 @@ def particle_descriptors(
     ``min_diameter_px`` drops anything whose equivalent diameter is below
     that floor — a manual override for images where scratches, staining,
     or pitting survive thresholding as spurious "particles".
+
+    ``split_touching`` watershed-separates particles in contact before
+    measuring (see ``split_touching_particles``); without it a dense
+    micrograph reports fused clusters as single oversized particles.
     """
     circ: list[float] = []
     aspect: list[float] = []
@@ -119,7 +179,8 @@ def particle_descriptors(
 
     for binary in binaries:
         h, w = binary.shape
-        for region in regionprops(label(binary)):
+        lab = split_touching_particles(binary) if split_touching else label(binary)
+        for region in regionprops(lab):
             if region.area < MIN_PARTICLE_PX:
                 continue
             r0, c0, r1, c1 = region.bbox
@@ -278,6 +339,7 @@ def suggest_generator_settings(
     binaries: list[np.ndarray],
     pixel_per_um: float | None,
     min_diameter_px: float = 0.0,
+    split_touching: bool = True,
 ) -> GeneratorSuggestion:
     """Pool descriptors across ``binaries`` and propose generator settings.
 
@@ -290,7 +352,7 @@ def suggest_generator_settings(
     that a simulation built from it reproduces the micrograph's L/A and
     S/V — and so that surviving fine debris cannot deflate it.
     """
-    all_desc = particle_descriptors(binaries, min_diameter_px)
+    all_desc = particle_descriptors(binaries, min_diameter_px, split_touching)
     if all_desc.n_particles == 0:
         raise ValueError(
             "no complete particles found — check the segmentation polarity, "
